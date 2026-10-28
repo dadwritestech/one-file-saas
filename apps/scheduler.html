@@ -175,6 +175,7 @@ function defaults() {
 }
 function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
 let state = load() || defaults();
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state)); // pin seeded ids so share links stay valid
 function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
 
 /* ---------- link encoding (deflate + base64url, so links stay short) ---------- */

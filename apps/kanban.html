@@ -235,6 +235,7 @@ function seed() {
 }
 
 let state = load() || seed();
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state)); // pin seeded ids so share links stay valid
 function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.boards && s.boards.length ? s : null; } catch { return null; } }
 function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
 const board = () => state.boards.find((b) => b.id === state.current) || state.boards[0];

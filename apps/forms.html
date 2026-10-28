@@ -1,0 +1,527 @@
+<!doctype html>
+<!--
+  one-file-saas · Asks
+  Replaces: a Typeform-like form builder with responses (Typeform Basic, ~$300/yr)
+  Build a form, fill it one question at a time, see responses with summaries and CSV export.
+  Collecting from other people without a server: share the #fill= link (the form travels inside
+  it). Respondents finish with a response code they send you; paste it into Responses.
+  On a shared device (a kiosk, a tablet at an event) responses save directly.
+  Data: localStorage key "ofs.forms.v1". Export/Import JSON from the header. No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asks · one-file-saas</title>
+<style>
+  :root {
+    --bg: #f7f4ee; --panel: #ffffff; --ink: #14161f; --ink-2: #555a6b; --ink-3: #9297a6; --line: #e6e1d6;
+    --brand: #2433d6; --hot: #ff5a36;
+    --display: "Sitka Display", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --sans: "Segoe UI Variable Display", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1016; --panel: #181a23; --ink: #eceef6; --ink-2: #a3a8ba; --ink-3: #686d80; --line: #282b37; --brand: #7d88ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); min-height: 100vh; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .hidden { display: none !important; }
+
+  header.bar { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  .logo { font: 700 22px var(--display); display: flex; align-items: center; gap: 8px; }
+  .logo i { width: 22px; height: 22px; border-radius: 50% 50% 50% 4px; background: var(--hot); display: inline-block; }
+  .formsel { border: 0; background: transparent; font-weight: 600; font-size: 15px; max-width: 260px; padding: 4px; border-bottom: 1px dashed var(--ink-3); }
+  .tabs { display: flex; gap: 2px; background: var(--bg); border-radius: 999px; padding: 3px; margin: 0 auto; }
+  .tabs button { border: 0; background: none; padding: 6px 16px; border-radius: 999px; font-weight: 600; color: var(--ink-2); }
+  .tabs button.on { background: var(--ink); color: var(--panel); }
+  .tabs .badge { font: 11px var(--mono); background: var(--hot); color: #fff; border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+  .btn { border: 1px solid var(--ink); background: var(--ink); color: var(--panel); border-radius: 8px; padding: 7px 14px; font-weight: 600; }
+  .btn.alt { background: transparent; color: var(--ink); border-color: var(--line); }
+  .btn.alt:hover { border-color: var(--ink); }
+  .btn.small { padding: 4px 10px; font-size: 13px; }
+  .x { border: 0; background: none; color: var(--ink-3); padding: 2px 6px; border-radius: 4px; }
+  .x:hover { color: var(--hot); background: var(--bg); }
+
+  /* ---------- builder ---------- */
+  .build { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 58px); }
+  .qlist { border-right: 1px solid var(--line); padding: 16px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+  .qlist h4 { margin: 4px 0 6px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .qi { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center; padding: 9px 10px; border-radius: 9px; border: 1px solid transparent; cursor: pointer; }
+  .qi:hover { background: var(--bg); }
+  .qi.on { border-color: var(--ink); background: var(--bg); }
+  .qi .n { font: 700 12px var(--mono); background: var(--c, var(--brand)); color: #fff; border-radius: 6px; text-align: center; padding: 3px 0; }
+  .qi .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .qi .mv { display: flex; flex-direction: column; opacity: 0; }
+  .qi:hover .mv, .qi.on .mv { opacity: 1; }
+  .qi .mv button { border: 0; background: none; font-size: 10px; line-height: 1; color: var(--ink-3); padding: 1px 4px; }
+  .addmenu { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .addmenu button { border: 1px dashed var(--line); background: none; border-radius: 8px; padding: 7px 6px; font-size: 12.5px; text-align: left; color: var(--ink-2); }
+  .addmenu button:hover { border-color: var(--ink); color: var(--ink); }
+  .editor { padding: 34px 44px; max-width: 760px; }
+  .editor .kind { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--brand); margin-bottom: 8px; }
+  .editor .q-title { font: 600 30px/1.2 var(--display); border: 0; background: none; width: 100%; padding: 4px 0; border-bottom: 2px solid transparent; }
+  .editor .q-title:focus { outline: none; border-bottom-color: var(--brand); }
+  .editor .q-help { border: 0; background: none; width: 100%; color: var(--ink-2); font-size: 16px; padding: 4px 0; }
+  .editor .q-help:focus { outline: none; }
+  .opts { display: grid; gap: 8px; margin-top: 18px; }
+  .opt { display: flex; gap: 8px; align-items: center; }
+  .opt .key { font: 700 12px var(--mono); border: 1px solid var(--line); border-radius: 5px; width: 26px; text-align: center; padding: 3px 0; color: var(--ink-2); }
+  .opt input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
+  .settings { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 14px; align-items: center; }
+  .settings label { display: flex; gap: 6px; align-items: center; }
+  .settings select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: var(--panel); }
+  .formmeta { display: grid; gap: 12px; }
+  .formmeta label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+  .formmeta input, .formmeta textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); font-size: 15px; }
+  .themes { display: flex; gap: 8px; }
+  .themes button { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
+  .themes button.on { box-shadow: 0 0 0 2px var(--ink); }
+  .share { margin-top: 30px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .share code { display: block; font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--bg); padding: 8px; border-radius: 6px; margin: 8px 0; }
+
+  /* ---------- fill (respondent) ---------- */
+  .fill { --c: var(--brand); position: fixed; inset: 0; background: var(--c); color: #fbf8f1; z-index: 20; display: grid; overflow: hidden; }
+  .fill.embedded { position: relative; inset: auto; min-height: calc(100vh - 58px); }
+  .fill .prog { position: absolute; top: 0; left: 0; height: 4px; background: #fbf8f1; transition: width .4s cubic-bezier(.2,.8,.2,1); }
+  .fill .stagewrap { display: grid; place-items: center; padding: 40px 24px 90px; }
+  .fill .stage { width: min(720px, 100%); animation: inq .45s cubic-bezier(.2,.8,.2,1); }
+  .fill .stage.back { animation-name: inqb; }
+  @keyframes inq { from { opacity: 0; transform: translateY(40px); } }
+  @keyframes inqb { from { opacity: 0; transform: translateY(-40px); } }
+  .fill .num { font: 700 14px var(--mono); opacity: .75; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
+  .fill h1 { font: 500 clamp(28px, 4.2vw, 46px)/1.15 var(--display); margin: 0 0 10px; letter-spacing: -0.01em; }
+  .fill h1 .req { color: var(--hot); }
+  .fill .help { font-size: 19px; opacity: .78; margin: 0 0 26px; }
+  .fill input.ans, .fill textarea.ans {
+    width: 100%; background: transparent; border: 0; border-bottom: 2px solid rgba(251,248,241,.45); color: #fbf8f1; font: 400 28px var(--sans); padding: 8px 0;
+  }
+  .fill textarea.ans { min-height: 120px; resize: none; font-size: 22px; }
+  .fill input.ans:focus, .fill textarea.ans:focus { outline: none; border-bottom-color: #fbf8f1; }
+  .fill input.ans::placeholder, .fill textarea.ans::placeholder { color: rgba(251,248,241,.4); }
+  .fill input[type=date].ans { color-scheme: dark; }
+  .choices { display: grid; gap: 10px; max-width: 460px; }
+  .choice { display: flex; gap: 12px; align-items: center; text-align: left; background: rgba(251,248,241,.1); border: 1px solid rgba(251,248,241,.45); color: #fbf8f1; border-radius: 8px; padding: 10px 12px; font-size: 18px; transition: background .12s; }
+  .choice:hover { background: rgba(251,248,241,.22); }
+  .choice .k { font: 700 12px var(--mono); border: 1px solid rgba(251,248,241,.7); border-radius: 4px; width: 24px; text-align: center; padding: 2px 0; flex: none; }
+  .choice.on { background: #fbf8f1; color: var(--c); }
+  .choice.on .k { background: var(--c); color: #fbf8f1; border-color: var(--c); }
+  .choice.flash { animation: flash .35s; }
+  @keyframes flash { 30% { opacity: .3; } 60% { opacity: 1; } }
+  .scale { display: flex; gap: 8px; flex-wrap: wrap; }
+  .scale button { min-width: 52px; height: 56px; font: 700 20px var(--sans); background: rgba(251,248,241,.1); color: #fbf8f1; border: 1px solid rgba(251,248,241,.45); border-radius: 8px; }
+  .scale button.on { background: #fbf8f1; color: var(--c); }
+  .scale-legend { display: flex; justify-content: space-between; max-width: 640px; font-size: 13px; opacity: .7; margin-top: 8px; }
+  .ok { display: flex; gap: 14px; align-items: center; margin-top: 28px; }
+  .ok button { background: #fbf8f1; color: var(--c); border: 0; padding: 12px 24px; border-radius: 8px; font: 700 18px var(--sans); }
+  .ok small { opacity: .7; }
+  .ferr { color: #fff; background: var(--hot); display: inline-block; padding: 4px 10px; border-radius: 6px; margin-top: 14px; font-size: 14px; }
+  .fnav { position: absolute; right: 22px; bottom: 22px; display: flex; gap: 2px; }
+  .fnav button { width: 42px; height: 38px; border: 0; background: #fbf8f1; color: var(--c); font-size: 16px; }
+  .fnav button:first-child { border-radius: 8px 0 0 8px; } .fnav button:last-child { border-radius: 0 8px 8px 0; }
+  .fnav button:disabled { opacity: .45; }
+  .fill .close { position: absolute; left: 22px; bottom: 22px; background: none; border: 1px solid rgba(251,248,241,.5); color: #fbf8f1; border-radius: 8px; padding: 8px 12px; }
+  .fill .brandmark { position: absolute; right: 120px; bottom: 30px; font-size: 12px; opacity: .6; }
+  .codebox { font: 12px var(--mono); word-break: break-all; background: rgba(0,0,0,.18); padding: 12px; border-radius: 8px; margin: 14px 0; max-height: 120px; overflow: auto; }
+
+  /* ---------- responses ---------- */
+  .resp { padding: 28px 34px; max-width: 1100px; margin: 0 auto; }
+  .resp-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+  .resp-head h2 { font: 600 30px var(--display); margin: 0; }
+  .resp-head .count { font: 700 40px var(--display); color: var(--brand); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .sumcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .sumcard h3 { font: 600 17px var(--display); margin: 0 0 4px; }
+  .sumcard .meta { font-size: 12px; color: var(--ink-3); margin-bottom: 12px; }
+  .barrow { display: grid; grid-template-columns: minmax(0, 1fr) 46px; gap: 8px; align-items: center; margin-bottom: 7px; font-size: 13.5px; }
+  .barrow .track { position: relative; background: var(--bg); border-radius: 5px; overflow: hidden; padding: 5px 8px; }
+  .barrow .fillbar { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--brand) 22%, transparent); transition: width .5s; }
+  .barrow .lbl { position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .barrow .pct { font: 600 12px var(--mono); text-align: right; color: var(--ink-2); }
+  .big { font: 600 44px var(--display); color: var(--brand); line-height: 1; }
+  .texts { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+  .texts div { background: var(--bg); border-radius: 6px; padding: 6px 9px; font-size: 13.5px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 22px; background: var(--panel); border-radius: 12px; overflow: hidden; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); background: var(--panel); }
+  .tablewrap { overflow-x: auto; }
+  .import { display: flex; gap: 8px; margin: 10px 0 18px; }
+  .import input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
+  .empty { text-align: center; padding: 60px 20px; color: var(--ink-2); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translate(-50%, 90px); opacity: 0; background: var(--ink); color: var(--panel); padding: 10px 18px; border-radius: 10px; transition: .25s; font-weight: 600; z-index: 50; }
+  .toast.show { transform: translate(-50%, 0); opacity: 1; }
+  @media (max-width: 820px) { .build { grid-template-columns: 1fr; } .qlist { border-right: 0; border-bottom: 1px solid var(--line); } .editor { padding: 24px; } }
+</style>
+</head>
+<body>
+<header class="bar" id="bar">
+  <div class="logo"><i></i>Asks</div>
+  <select class="formsel" id="formSel" aria-label="Current form"></select>
+  <button class="x" id="newForm" title="New form">＋ New</button>
+  <nav class="tabs" role="tablist">
+    <button data-tab="build" role="tab">Build</button>
+    <button data-tab="fill" role="tab">Fill</button>
+    <button data-tab="responses" role="tab">Responses</button>
+  </nav>
+  <button class="btn alt small" id="exportBtn">Export</button>
+  <button class="btn alt small" id="importBtn">Import</button>
+  <input type="file" id="importFile" accept=".json" class="hidden">
+</header>
+<main id="main"></main>
+<div class="toast" id="toast" role="status"></div>
+<script>
+'use strict';
+const KEY = 'ofs.forms.v1';
+const THEMES = ['#2433d6', '#0e6b4f', '#b4232c', '#1d1d1f', '#7a3fd1'];
+const TYPES = {
+  short: 'Short text', long: 'Long text', email: 'Email', number: 'Number', choice: 'Multiple choice',
+  multi: 'Checkboxes', rating: 'Rating 1–5', nps: '0–10 scale', yesno: 'Yes / No', date: 'Date',
+};
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2000); }
+const b64u = (bytes) => { let s = ''; bytes.forEach((b) => { s += String.fromCharCode(b); }); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+async function pack(obj) {
+  const raw = new TextEncoder().encode(JSON.stringify(obj));
+  if (!('CompressionStream' in window)) return 'j' + b64u(raw);
+  return 'z' + b64u(new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer()));
+}
+async function unpack(str) {
+  const bytes = unb64u(str.slice(1));
+  const raw = str[0] === 'z' ? new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()) : bytes;
+  return JSON.parse(new TextDecoder().decode(raw));
+}
+function download(name, text, type) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ---------- state ---------- */
+const q = (type, title, extra = {}) => ({ id: uid(), type, title, help: '', required: false, options: [], ...extra });
+function newForm(title = 'Untitled form') {
+  return { id: uid(), title, intro: '', thanks: 'Thanks! Your answers were recorded.', theme: THEMES[0], questions: [q('short', 'What should we call you?', { required: true })], responses: [] };
+}
+function seed() {
+  const f = newForm('Product feedback');
+  f.intro = 'Two minutes, six questions. It really helps.';
+  f.questions = [
+    q('short', 'What should we call you?', { required: true }),
+    q('choice', 'How did you hear about us?', { options: ['A friend', 'Search', 'Social media', 'Somewhere else'] }),
+    q('rating', 'How would you rate the product so far?', { required: true }),
+    q('multi', 'Which features do you use?', { options: ['Boards', 'Calendar', 'Reports', 'Integrations'], help: 'Pick all that apply.' }),
+    q('nps', 'How likely are you to recommend us to a friend?'),
+    q('long', 'Anything we should fix first?', { help: 'Shift+Enter for a new line.' }),
+  ];
+  return { current: f.id, tab: 'build', forms: [f] };
+}
+function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.forms && s.forms.length ? s : null; } catch { return null; } }
+let state = load() || seed();
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state)); // pin seeded ids so share links stay valid
+const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+const form = () => state.forms.find((f) => f.id === state.current) || state.forms[0];
+let selQ = null;
+
+/* ---------- header ---------- */
+function renderBar() {
+  $('#formSel').replaceChildren(...state.forms.map((f) => h('option', { value: f.id, selected: f.id === form().id }, f.title)));
+  document.querySelectorAll('.tabs button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.tab === state.tab);
+    b.setAttribute('aria-selected', b.dataset.tab === state.tab);
+    if (b.dataset.tab === 'responses') { b.replaceChildren('Responses'); const n = form().responses.length; if (n) b.append(h('span', { class: 'badge' }, String(n))); }
+  });
+}
+$('#formSel').addEventListener('change', (e) => { state.current = e.target.value; selQ = null; save(); render(); });
+$('#newForm').addEventListener('click', () => { const f = newForm(); state.forms.push(f); state.current = f.id; state.tab = 'build'; selQ = null; save(); render(); });
+document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('button'); if (!t) return; state.tab = t.dataset.tab; save(); render(); });
+$('#exportBtn').addEventListener('click', () => download(`forms-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state, null, 2), 'application/json'));
+$('#importBtn').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  try { const d = JSON.parse(await file.text()); if (!Array.isArray(d.forms)) throw 0; state = d; save(); render(); toast('Imported'); } catch { toast('Not an Asks export'); }
+  e.target.value = '';
+});
+
+/* ---------- builder ---------- */
+function renderBuild() {
+  const f = form();
+  if (selQ !== 'meta' && !f.questions.find((x) => x.id === selQ)) selQ = f.questions[0] ? f.questions[0].id : 'meta';
+  const list = h('div', { class: 'qlist' },
+    h('h4', {}, 'Form'),
+    h('div', { class: 'qi' + (selQ === 'meta' ? ' on' : ''), onclick: () => { selQ = 'meta'; render(); } }, h('span', { class: 'n', style: 'background:var(--hot)' }, '✦'), h('span', { class: 't' }, 'Welcome, theme & sharing'), h('span')),
+    h('h4', { style: 'margin-top:10px' }, `Questions · ${f.questions.length}`),
+    f.questions.map((x, i) => h('div', { class: 'qi' + (x.id === selQ ? ' on' : ''), style: `--c:${f.theme}`, onclick: () => { selQ = x.id; render(); }, 'data-q': x.id },
+      h('span', { class: 'n' }, String(i + 1)), h('span', { class: 't', title: x.title }, x.title || 'Untitled question'),
+      h('span', { class: 'mv' },
+        h('button', { 'aria-label': 'Move up', onclick: (e) => { e.stopPropagation(); move(i, -1); } }, '▲'),
+        h('button', { 'aria-label': 'Move down', onclick: (e) => { e.stopPropagation(); move(i, 1); } }, '▼')))),
+    h('h4', { style: 'margin-top:12px' }, 'Add a question'),
+    h('div', { class: 'addmenu' }, Object.entries(TYPES).map(([k, label]) => h('button', { onclick: () => {
+      const nq = q(k, '', ['choice', 'multi'].includes(k) ? { options: ['Option 1', 'Option 2'] } : {});
+      f.questions.push(nq); selQ = nq.id; save(); render(); $('.q-title') && $('.q-title').focus();
+    } }, '+ ' + label))));
+  const editor = h('div', { class: 'editor' });
+  if (selQ === 'meta') editor.append(metaEditor(f)); else editor.append(questionEditor(f, f.questions.find((x) => x.id === selQ)));
+  return h('div', { class: 'build' }, list, editor);
+}
+function move(i, d) { const qs = form().questions; const j = i + d; if (j < 0 || j >= qs.length) return; [qs[i], qs[j]] = [qs[j], qs[i]]; save(); render(); }
+
+function questionEditor(f, x) {
+  const idx = f.questions.indexOf(x);
+  const listTitle = () => { const t = document.querySelector(`[data-q="${x.id}"] .t`); if (t) t.textContent = x.title || 'Untitled question'; };
+  const wrap = h('div', {},
+    h('div', { class: 'kind' }, `Question ${idx + 1} · ${TYPES[x.type]}`),
+    h('input', { class: 'q-title', value: x.title, placeholder: 'Type your question…', 'aria-label': 'Question', oninput: (e) => { x.title = e.target.value; save(); listTitle(); } }),
+    h('input', { class: 'q-help', value: x.help, placeholder: 'Description (optional)', 'aria-label': 'Description', oninput: (e) => { x.help = e.target.value; save(); } }));
+  if (x.type === 'choice' || x.type === 'multi') {
+    const opts = h('div', { class: 'opts' });
+    const draw = () => {
+      opts.replaceChildren(...x.options.map((o, i) => h('div', { class: 'opt' },
+        h('span', { class: 'key' }, String.fromCharCode(65 + i)),
+        h('input', { value: o, 'aria-label': `Option ${i + 1}`, oninput: (e) => { x.options[i] = e.target.value; save(); },
+          onkeydown: (e) => { if (e.key === 'Enter') { x.options.splice(i + 1, 0, ''); save(); draw(); opts.querySelectorAll('input')[i + 1].focus(); } } }),
+        h('button', { class: 'x', 'aria-label': 'Remove option', onclick: () => { x.options.splice(i, 1); save(); draw(); } }, '×'))),
+      h('button', { class: 'btn alt small', style: 'justify-self:start', onclick: () => { x.options.push(`Option ${x.options.length + 1}`); save(); draw(); } }, '+ Add option'));
+    };
+    draw(); wrap.append(opts);
+  } else {
+    const preview = { short: 'Short answer text', long: 'Long answer text', email: 'name@example.com', number: '0', rating: '★ ★ ★ ★ ★', nps: '0 1 2 3 4 5 6 7 8 9 10', yesno: 'Yes · No', date: 'YYYY-MM-DD' }[x.type];
+    wrap.append(h('div', { style: 'margin-top:22px;font-size:22px;color:var(--ink-3);border-bottom:2px solid var(--line);padding:6px 0;max-width:480px' }, preview));
+  }
+  wrap.append(h('div', { class: 'settings' },
+    h('label', {}, h('input', { type: 'checkbox', checked: x.required, onchange: (e) => { x.required = e.target.checked; save(); } }), 'Required'),
+    h('label', {}, 'Type', h('select', { onchange: (e) => { x.type = e.target.value; if (['choice', 'multi'].includes(x.type) && !x.options.length) x.options = ['Option 1', 'Option 2']; save(); render(); } },
+      Object.entries(TYPES).map(([k, v]) => h('option', { value: k, selected: k === x.type }, v)))),
+    h('button', { class: 'btn alt small', onclick: () => { const c = JSON.parse(JSON.stringify(x)); c.id = uid(); f.questions.splice(idx + 1, 0, c); selQ = c.id; save(); render(); } }, 'Duplicate'),
+    h('button', { class: 'btn alt small', style: 'color:var(--hot)', onclick: () => { f.questions.splice(idx, 1); selQ = null; save(); render(); } }, 'Delete')));
+  return wrap;
+}
+
+function metaEditor(f) {
+  const share = h('div', { class: 'share' },
+    h('b', {}, 'Collect from other people'),
+    h('p', { style: 'margin:4px 0;color:var(--ink-2);font-size:13.5px' }, 'The whole form lives in this link. Respondents get a response code to send back; paste it into Responses. Host this file on any static site so the link opens for others.'),
+    h('code', { id: 'shareLink' }, '…'),
+    h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText($('#shareLink').textContent); toast('Link copied'); } catch { toast('Select the link and copy it'); } } }, 'Copy link'));
+  pack({ title: f.title, intro: f.intro, thanks: f.thanks, theme: f.theme, questions: f.questions, id: f.id }).then((p) => { const el = $('#shareLink'); if (el) el.textContent = location.href.split('#')[0] + '#fill=' + p; });
+  return h('div', { class: 'formmeta' },
+    h('div', { class: 'kind' }, 'Form settings'),
+    h('label', {}, 'Title', h('input', { value: f.title, id: 'formTitle', oninput: (e) => { f.title = e.target.value || 'Untitled form'; save(); renderBar(); } })),
+    h('label', {}, 'Welcome text (shown before the first question)', h('textarea', { rows: 2, oninput: (e) => { f.intro = e.target.value; save(); } }, f.intro)),
+    h('label', {}, 'Thank-you message', h('input', { value: f.thanks, oninput: (e) => { f.thanks = e.target.value; save(); } })),
+    h('label', {}, 'Theme', h('div', { class: 'themes' }, THEMES.map((c) => h('button', { class: c === f.theme ? 'on' : '', style: `background:${c}`, 'aria-label': 'Theme ' + c, onclick: () => { f.theme = c; save(); render(); } })))),
+    share,
+    h('button', { class: 'btn alt small', style: 'justify-self:start;color:var(--hot);margin-top:10px', onclick: () => {
+      if (state.forms.length === 1) return toast('Keep at least one form');
+      if (!confirm(`Delete "${f.title}" and its ${f.responses.length} responses?`)) return;
+      state.forms = state.forms.filter((x) => x !== f); state.current = state.forms[0].id; save(); render();
+    } }, 'Delete this form'));
+}
+
+/* ---------- fill ---------- */
+// Runs a form one question at a time. onDone(answers) receives { [qid]: value }.
+function runner(f, { embedded, onDone, onClose }) {
+  const root = h('div', { class: 'fill' + (embedded ? ' embedded' : ''), style: `--c:${f.theme}` });
+  const answers = {};
+  let i = f.intro ? -1 : 0;
+  let dir = 1;
+  const total = f.questions.length;
+  const prog = h('div', { class: 'prog' });
+  const stagewrap = h('div', { class: 'stagewrap' });
+  const up = h('button', { 'aria-label': 'Previous question', onclick: () => go(-1) }, '▲');
+  const down = h('button', { 'aria-label': 'Next question', onclick: () => next() }, '▼');
+  root.append(prog, stagewrap, h('div', { class: 'fnav' }, up, down), h('span', { class: 'brandmark' }, 'Made with Asks · one-file-saas'));
+  if (onClose) root.append(h('button', { class: 'close', onclick: onClose }, 'Exit preview'));
+
+  const empty = (v) => v == null || v === '' || (Array.isArray(v) && !v.length);
+  function validate(x) {
+    const v = answers[x.id];
+    if (x.required && empty(v)) return 'Please fill this in';
+    if (!empty(v) && x.type === 'email' && !/^\S+@\S+\.\S+$/.test(v)) return 'Hmm, that email doesn’t look right';
+    if (!empty(v) && x.type === 'number' && isNaN(+v)) return 'Numbers only, please';
+    return '';
+  }
+  function go(d) { dir = d; i = Math.max(f.intro ? -1 : 0, Math.min(total, i + d)); draw(); }
+  function next() {
+    if (i >= 0 && i < total) { const err = validate(f.questions[i]); if (err) { const e = stagewrap.querySelector('.ferr'); e.textContent = err; e.classList.remove('hidden'); return; } }
+    if (i === total - 1) { i = total; onDone(answers); draw(); return; }
+    go(1);
+  }
+  function draw() {
+    prog.style.width = (Math.max(0, i) / Math.max(1, total)) * 100 + '%';
+    up.disabled = i <= (f.intro ? -1 : 0) || i >= total; down.disabled = i >= total;
+    const stage = h('div', { class: 'stage' + (dir < 0 ? ' back' : '') });
+    if (i === -1) {
+      stage.append(h('h1', {}, f.title), h('p', { class: 'help' }, f.intro), h('div', { class: 'ok' }, h('button', { onclick: next }, 'Start'), h('small', {}, 'press Enter ↵')));
+    } else if (i >= total) {
+      stage.append(h('h1', {}, f.thanks || 'Thank you!'), root.doneExtra || '');
+    } else {
+      const x = f.questions[i];
+      stage.append(
+        h('div', { class: 'num' }, `${i + 1} →`),
+        h('h1', {}, x.title || 'Untitled question', x.required ? h('span', { class: 'req' }, ' *') : ''),
+        x.help ? h('p', { class: 'help' }, x.help) : h('div', { style: 'height:18px' }),
+        input(x),
+        h('div', { class: 'ferr hidden' }),
+        h('div', { class: 'ok' }, h('button', { onclick: next }, i === total - 1 ? 'Submit' : 'OK ✓'), h('small', {}, x.type === 'long' ? 'Shift + Enter ↵ for a new line' : 'press Enter ↵')));
+    }
+    stagewrap.replaceChildren(stage);
+    const focusable = stage.querySelector('input, textarea');
+    if (focusable) focusable.focus(); else stage.querySelector('.ok button, .choice') && root.focus();
+  }
+  function input(x) {
+    const set = (v) => { answers[x.id] = v; };
+    const v = answers[x.id];
+    if (['short', 'email', 'number', 'date'].includes(x.type)) {
+      return h('input', { class: 'ans', type: x.type === 'short' ? 'text' : x.type, value: v || '', placeholder: x.type === 'email' ? 'name@example.com' : 'Type your answer here…', 'aria-label': x.title, oninput: (e) => set(e.target.value) });
+    }
+    if (x.type === 'long') return h('textarea', { class: 'ans', placeholder: 'Type your answer here…', 'aria-label': x.title, oninput: (e) => set(e.target.value) }, v || '');
+    if (x.type === 'choice' || x.type === 'multi' || x.type === 'yesno') {
+      const opts = x.type === 'yesno' ? ['Yes', 'No'] : x.options;
+      const box = h('div', { class: 'choices', role: x.type === 'multi' ? 'group' : 'radiogroup' });
+      const draw = () => box.replaceChildren(...opts.map((o, k) => {
+        const on = x.type === 'multi' ? (answers[x.id] || []).includes(o) : answers[x.id] === o;
+        return h('button', { class: 'choice' + (on ? ' on' : ''), 'aria-pressed': String(on), onclick: (e) => pick(o, e.currentTarget) }, h('span', { class: 'k' }, x.type === 'yesno' ? o[0] : String.fromCharCode(65 + k)), o);
+      }));
+      const pick = (o) => {
+        if (x.type === 'multi') { const cur = new Set(answers[x.id] || []); cur.has(o) ? cur.delete(o) : cur.add(o); set([...cur]); draw(); }
+        else { set(o); draw(); const btn = [...box.children].find((b) => b.classList.contains('on')); btn.classList.add('flash'); setTimeout(next, 380); }
+      };
+      box.pickKey = (key) => { const k = x.type === 'yesno' ? opts.findIndex((o) => o[0] === key) : key.charCodeAt(0) - 65; if (opts[k] != null) pick(opts[k]); };
+      draw(); return box;
+    }
+    const n = x.type === 'rating' ? [1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const box = h('div', {});
+    const draw = () => box.replaceChildren(h('div', { class: 'scale' }, n.map((k) => h('button', { class: answers[x.id] === k ? 'on' : '', 'aria-label': String(k), onclick: () => { set(k); draw(); setTimeout(next, 300); } }, x.type === 'rating' ? '★'.repeat(1) + k : String(k)))),
+      h('div', { class: 'scale-legend' }, h('span', {}, x.type === 'rating' ? 'Poor' : 'Not likely'), h('span', {}, x.type === 'rating' ? 'Great' : 'Very likely')));
+    box.pickKey = (key) => { const k = +key; if (n.includes(k)) { set(k); draw(); setTimeout(next, 300); } };
+    draw(); return box;
+  }
+  root.tabIndex = -1;
+  root.addEventListener('keydown', (e) => {
+    const typing = e.target.matches('input, textarea');
+    if (e.key === 'Enter' && !(e.target.matches('textarea') && e.shiftKey) && !e.target.matches('button')) { e.preventDefault(); if (i < total) next(); return; }
+    if (!typing && /^[a-z0-9]$/i.test(e.key)) { const p = stagewrap.querySelector('.choices, .scale')?.closest('.choices') || stagewrap.querySelector('.scale')?.parentElement; if (p && p.pickKey) p.pickKey(e.key.toUpperCase()); }
+  });
+  draw();
+  return root;
+}
+
+function renderFill() {
+  const f = form();
+  const root = runner(f, { embedded: true, onDone: (answers) => {
+    f.responses.push({ id: uid(), at: Date.now(), answers }); save(); renderBar();
+  } });
+  root.doneExtra = h('div', { class: 'ok' }, h('button', { onclick: render }, 'Submit another response'), h('small', {}, 'Responses are saved in this browser'));
+  return root;
+}
+
+/* ---------- responses ---------- */
+function fmtAns(x, v) { if (v == null || v === '') return ''; return Array.isArray(v) ? v.join(', ') : String(v); }
+function renderResponses() {
+  const f = form();
+  const rs = f.responses;
+  const wrap = h('div', { class: 'resp' },
+    h('div', { class: 'resp-head' }, h('span', { class: 'count', id: 'respCount' }, String(rs.length)), h('h2', {}, rs.length === 1 ? 'response' : 'responses'),
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'btn alt small', disabled: !rs.length, onclick: exportCsv }, 'Export CSV')),
+    h('div', { class: 'import' }, h('input', { id: 'codeIn', placeholder: 'Paste a response code (ASKS-…) someone sent you' }), h('button', { class: 'btn small', onclick: importCode }, 'Add response')));
+  if (!rs.length) { wrap.append(h('div', { class: 'empty' }, h('p', { style: 'font:500 24px var(--display);margin:0 0 8px;color:var(--ink)' }, 'No responses yet'), 'Open the Fill tab and answer your own form, or share the link from Build → Welcome & sharing.')); return wrap; }
+  wrap.append(h('div', { class: 'cards' }, f.questions.map((x) => summary(x, rs))));
+  wrap.append(h('div', { class: 'tablewrap' }, h('table', {},
+    h('thead', {}, h('tr', {}, h('th', {}, 'Submitted'), f.questions.map((x) => h('th', {}, x.title)), h('th', {}))),
+    h('tbody', {}, [...rs].reverse().map((r) => h('tr', {},
+      h('td', { style: 'white-space:nowrap' }, new Date(r.at).toLocaleString()),
+      f.questions.map((x) => h('td', {}, fmtAns(x, r.answers[x.id]))),
+      h('td', {}, h('button', { class: 'x', 'aria-label': 'Delete response', onclick: () => { if (!confirm('Delete this response?')) return; f.responses = f.responses.filter((y) => y !== r); save(); render(); } }, '×'))))))));
+  return wrap;
+}
+function summary(x, rs) {
+  const vals = rs.map((r) => r.answers[x.id]).filter((v) => v != null && v !== '' && !(Array.isArray(v) && !v.length));
+  const card = h('div', { class: 'sumcard' }, h('h3', {}, x.title), h('div', { class: 'meta' }, `${TYPES[x.type]} · ${vals.length} of ${rs.length} answered`));
+  if (['choice', 'multi', 'yesno'].includes(x.type)) {
+    const opts = x.type === 'yesno' ? ['Yes', 'No'] : x.options;
+    const counts = opts.map((o) => vals.filter((v) => (Array.isArray(v) ? v.includes(o) : v === o)).length);
+    opts.forEach((o, k) => { const pct = vals.length ? Math.round(counts[k] / vals.length * 100) : 0;
+      card.append(h('div', { class: 'barrow' }, h('div', { class: 'track' }, h('span', { class: 'fillbar', style: `width:${pct}%` }), h('span', { class: 'lbl' }, `${o} · ${counts[k]}`)), h('span', { class: 'pct' }, pct + '%'))); });
+  } else if (['rating', 'nps', 'number'].includes(x.type)) {
+    const nums = vals.map(Number).filter((n) => !isNaN(n));
+    const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+    card.append(h('div', { class: 'big' }, nums.length ? avg.toFixed(1) : '–'), h('div', { class: 'meta', style: 'margin-top:4px' }, x.type === 'rating' ? 'average out of 5' : x.type === 'nps' ? npsLine(nums) : 'average'));
+  } else {
+    card.append(h('div', { class: 'texts' }, vals.slice(-20).reverse().map((v) => h('div', {}, String(v)))));
+  }
+  return card;
+}
+function npsLine(nums) {
+  if (!nums.length) return '';
+  const p = nums.filter((n) => n >= 9).length, d = nums.filter((n) => n <= 6).length;
+  return `average · NPS ${Math.round((p - d) / nums.length * 100)}`;
+}
+function exportCsv() {
+  const f = form();
+  const cell = (s) => `"${String(s).replace(/"/g, '""')}"`;
+  const rows = [['Submitted', ...f.questions.map((x) => x.title)], ...f.responses.map((r) => [new Date(r.at).toISOString(), ...f.questions.map((x) => fmtAns(x, r.answers[x.id]))])];
+  download(`${f.title.replace(/\W+/g, '-').toLowerCase()}-responses.csv`, rows.map((r) => r.map(cell).join(',')).join('\r\n'), 'text/csv');
+}
+async function importCode() {
+  const raw = $('#codeIn').value.trim().replace(/^ASKS-/, '');
+  try {
+    const r = await unpack(raw);
+    const f = state.forms.find((x) => x.id === r.form) || form();
+    if (!r.answers) throw 0;
+    if (f.responses.some((x) => x.id === r.id)) return toast('Already added');
+    f.responses.push({ id: r.id, at: r.at, answers: r.answers }); save(); render(); toast('Response added to ' + f.title);
+  } catch { toast('That is not a response code'); }
+}
+
+/* ---------- respondent link (#fill=…) ---------- */
+async function renderPublic(payload) {
+  let f;
+  try { f = await unpack(payload); } catch { document.body.replaceChildren(h('p', { style: 'padding:40px' }, 'This form link is broken.')); return; }
+  $('#bar').classList.add('hidden');
+  const own = state.forms.find((x) => x.id === f.id);
+  let root;
+  root = runner(f, { embedded: false, onDone: async (answers) => {
+    const r = { id: uid(), form: f.id, at: Date.now(), answers };
+    if (own) { own.responses.push(r); save(); root.doneExtra = h('p', { class: 'help' }, 'Saved to your responses (this is your own form).'); }
+    else {
+      const code = 'ASKS-' + await pack(r);
+      root.doneExtra = h('div', {}, h('p', { class: 'help' }, 'One last step: send this code to the person who asked, so they get your answers.'), h('div', { class: 'codebox', id: 'respCode' }, code),
+        h('div', { class: 'ok' }, h('button', { onclick: async () => { try { await navigator.clipboard.writeText(code); toast('Copied'); } catch { toast('Select the code to copy'); } } }, 'Copy code')));
+    }
+    root.querySelector('.stage').append(root.doneExtra);
+  } });
+  $('#main').replaceChildren(root);
+  root.focus();
+}
+
+function render() {
+  renderBar();
+  const main = $('#main');
+  if (state.tab === 'fill') main.replaceChildren(renderFill());
+  else if (state.tab === 'responses') main.replaceChildren(renderResponses());
+  else main.replaceChildren(renderBuild());
+  if (state.tab === 'fill') main.firstChild.focus();
+}
+const m = location.hash.match(/^#fill=(.+)$/);
+if (m) renderPublic(m[1]); else render();
+window.addEventListener('hashchange', () => location.reload());
+</script>
+</body>
+</html>
