@@ -1,0 +1,481 @@
+<!doctype html>
+<!--
+  one-file-saas · Board
+  Replaces: a Trello-like kanban board (Trello Standard, ~$60/yr per user)
+  Data: localStorage key "ofs.kanban.v1". Export/Import JSON from the menu.
+  No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board · one-file-saas</title>
+<style>
+  :root {
+    --paper: #f3efe6; --paper-2: #ebe5d8; --card: #fffdf8; --ink: #1d1b16; --ink-2: #5c574b; --ink-3: #8f8877;
+    --rule: #d9d1bf; --accent: #e8552d; --focus: #1f6feb;
+    --l-red: #e5484d; --l-orange: #f08c00; --l-yellow: #e9c400; --l-green: #2f9e44; --l-blue: #1c7ed6; --l-violet: #7048e8;
+    --display: "Bahnschrift", "DIN Alternate", "DIN 2014", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+    --body: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #191814; --paper-2: #211f1a; --card: #2a2721; --ink: #f1ebdd; --ink-2: #b8b09e; --ink-3: #807866; --rule: #3a362d; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--paper); color: var(--ink); font: 14px/1.45 var(--body);
+    background-image: radial-gradient(var(--rule) 0.7px, transparent 0.7px); background-size: 18px 18px;
+    display: flex; flex-direction: column;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 14px 22px; border-bottom: 2px solid var(--ink);
+    background: var(--paper);
+  }
+  .brand { font: 700 26px/1 var(--display); letter-spacing: -0.02em; text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
+  .brand i { width: 14px; height: 14px; background: var(--accent); display: inline-block; transform: rotate(45deg); }
+  .board-select {
+    font: 600 18px var(--display); border: 0; background: transparent; padding: 4px 6px; border-bottom: 1px dashed var(--ink-3);
+    max-width: 280px;
+  }
+  .grow { flex: 1; }
+  .search {
+    border: 1px solid var(--rule); background: var(--card); border-radius: 999px; padding: 7px 14px; width: 220px;
+  }
+  .btn {
+    border: 1.5px solid var(--ink); background: var(--card); padding: 6px 12px; border-radius: 6px; font-weight: 600;
+    box-shadow: 2px 2px 0 var(--ink); transition: transform .08s, box-shadow .08s;
+  }
+  .btn:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink); }
+  .btn:active { transform: translate(1px, 1px); box-shadow: 0 0 0 var(--ink); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--ink); }
+  .btn.ghost { box-shadow: none; border-color: transparent; background: transparent; }
+  .btn.ghost:hover { background: var(--paper-2); transform: none; }
+  .menu { position: relative; }
+  .menu-pop {
+    position: absolute; right: 0; top: calc(100% + 6px); background: var(--card); border: 1.5px solid var(--ink);
+    box-shadow: 4px 4px 0 var(--ink); border-radius: 8px; padding: 6px; min-width: 200px; z-index: 20; display: none;
+  }
+  .menu-pop.open { display: block; }
+  .menu-pop button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 5px; }
+  .menu-pop button:hover { background: var(--paper-2); }
+  .menu-pop hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 0; }
+
+  main { flex: 1; overflow-x: auto; overflow-y: hidden; padding: 22px; display: flex; gap: 18px; align-items: flex-start; }
+  .col {
+    flex: 0 0 290px; max-height: 100%; display: flex; flex-direction: column; background: var(--paper-2);
+    border: 1.5px solid var(--ink); border-radius: 10px; box-shadow: 3px 3px 0 var(--ink);
+  }
+  body.intro .col { animation: rise .35s cubic-bezier(.2,.8,.2,1) both; }
+  .col.dragging-col { opacity: .4; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+  .col-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; cursor: grab; }
+  .col-title {
+    flex: 1; font: 700 15px var(--display); text-transform: uppercase; letter-spacing: .04em; border: 0; background: transparent;
+    padding: 2px 4px; border-radius: 4px; min-width: 0;
+  }
+  .col-title:focus { background: var(--card); }
+  .count { font: 12px var(--mono); color: var(--ink-2); background: var(--card); border: 1px solid var(--rule); padding: 1px 7px; border-radius: 999px; }
+  .count.over { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .col-body { overflow-y: auto; padding: 4px 10px 6px; min-height: 30px; display: flex; flex-direction: column; gap: 8px; }
+  .card {
+    background: var(--card); border: 1px solid var(--rule); border-radius: 7px; padding: 9px 11px; cursor: grab;
+    box-shadow: 0 1px 0 var(--rule); position: relative; transition: box-shadow .12s, transform .12s;
+  }
+  .card:hover { box-shadow: 0 4px 12px -6px rgba(0,0,0,.35); transform: translateY(-1px); }
+  .card.dragging { opacity: .35; }
+  .card .t { font-weight: 550; word-wrap: break-word; }
+  .labels { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .lab { height: 6px; width: 34px; border-radius: 3px; }
+  .meta { display: flex; gap: 10px; margin-top: 6px; font: 11.5px var(--mono); color: var(--ink-3); align-items: center; }
+  .meta .due.late { color: var(--l-red); font-weight: 700; }
+  .meta .due.soon { color: var(--l-orange); }
+  .placeholder { border: 2px dashed var(--ink-3); border-radius: 7px; min-height: 40px; background: transparent; }
+  .composer { padding: 6px 10px 10px; }
+  .composer textarea {
+    width: 100%; resize: none; border: 1px solid var(--rule); border-radius: 7px; padding: 8px 10px; background: var(--card);
+    min-height: 58px;
+  }
+  .composer .row { display: flex; gap: 6px; margin-top: 6px; }
+  .add-card { width: 100%; text-align: left; border: 0; background: none; color: var(--ink-2); padding: 7px 8px; border-radius: 6px; }
+  .add-card:hover { background: var(--card); color: var(--ink); }
+  .add-col {
+    flex: 0 0 240px; border: 1.5px dashed var(--ink-3); border-radius: 10px; padding: 14px; background: transparent;
+    color: var(--ink-2); font: 600 15px var(--display); text-transform: uppercase; letter-spacing: .04em;
+  }
+  .add-col:hover { border-color: var(--ink); color: var(--ink); }
+  .icon-btn { border: 0; background: none; color: var(--ink-3); padding: 2px 6px; border-radius: 4px; font-size: 16px; line-height: 1; }
+  .icon-btn:hover { background: var(--card); color: var(--ink); }
+  .hidden { display: none !important; }
+
+  dialog {
+    border: 2px solid var(--ink); border-radius: 12px; padding: 0; width: min(620px, 94vw); background: var(--card); color: var(--ink);
+    box-shadow: 8px 8px 0 var(--ink);
+  }
+  dialog::backdrop { background: rgba(20,18,12,.45); backdrop-filter: blur(2px); }
+  .dlg { padding: 20px 22px; display: grid; gap: 14px; }
+  .dlg h2 { margin: 0; }
+  .dlg .title-in { font: 700 22px var(--display); border: 0; border-bottom: 2px solid var(--rule); width: 100%; background: transparent; padding: 4px 0; }
+  .dlg .title-in:focus { border-color: var(--accent); outline: none; }
+  .dlg label.f { display: grid; gap: 4px; font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
+  .dlg textarea, .dlg input[type=date], .dlg select, .dlg input[type=number] {
+    border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; background: var(--paper); font: 14px var(--body); text-transform: none; letter-spacing: 0;
+  }
+  .dlg textarea { min-height: 110px; resize: vertical; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .swatches { display: flex; gap: 6px; }
+  .sw { width: 34px; height: 22px; border-radius: 5px; border: 2px solid transparent; }
+  .sw.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--card) inset; }
+  .check { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .check input[type=text] { flex: 1; border: 0; border-bottom: 1px solid transparent; background: transparent; padding: 3px 0; }
+  .check input[type=text]:focus { border-bottom-color: var(--rule); outline: none; }
+  .check.done input[type=text] { text-decoration: line-through; color: var(--ink-3); }
+  .progress { height: 5px; background: var(--paper-2); border-radius: 3px; overflow: hidden; }
+  .progress i { display: block; height: 100%; background: var(--l-green); transition: width .2s; }
+  .dlg-foot { display: flex; gap: 8px; justify-content: space-between; align-items: center; border-top: 1px solid var(--rule); padding-top: 12px; }
+  .danger { color: var(--l-red); }
+  footer { font: 11px var(--mono); color: var(--ink-3); padding: 6px 22px 10px; display: flex; justify-content: space-between; }
+  .toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--ink); color: var(--paper);
+    padding: 9px 16px; border-radius: 8px; transition: transform .25s, opacity .25s; opacity: 0; font-weight: 600;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  @media (max-width: 700px) { .search { width: 120px; } .brand span { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i><span>Board</span></div>
+  <select class="board-select" id="boardSelect" aria-label="Current board"></select>
+  <div class="grow"></div>
+  <input class="search" id="search" type="search" placeholder="Filter cards  /" aria-label="Filter cards">
+  <div class="menu">
+    <button class="btn" id="menuBtn" aria-haspopup="true">Menu ▾</button>
+    <div class="menu-pop" id="menuPop" role="menu">
+      <button data-act="new-board">New board…</button>
+      <button data-act="rename-board">Rename board…</button>
+      <button data-act="delete-board" class="danger">Delete board</button>
+      <hr>
+      <button data-act="export">Export JSON</button>
+      <button data-act="import">Import JSON…</button>
+    </div>
+  </div>
+  <input type="file" id="importFile" accept="application/json,.json" class="hidden">
+</header>
+<main id="board" aria-label="Board columns"></main>
+<footer><span>Your data never leaves this browser · <kbd>N</kbd> new card · <kbd>/</kbd> filter</span><span id="stats"></span></footer>
+
+<dialog id="cardDlg">
+  <form method="dialog" class="dlg" id="cardForm">
+    <input class="title-in" id="dTitle" aria-label="Card title" required>
+    <div class="grid2">
+      <label class="f">Column<select id="dCol"></select></label>
+      <label class="f">Due date<input type="date" id="dDue"></label>
+    </div>
+    <div class="f" style="display:grid;gap:6px;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2)">Labels<div class="swatches" id="dLabels"></div></div>
+    <label class="f">Description<textarea id="dDesc" placeholder="Add more detail…"></textarea></label>
+    <div style="display:grid;gap:6px">
+      <div style="display:flex;justify-content:space-between;font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2)"><span>Checklist</span><span id="dProg"></span></div>
+      <div class="progress"><i id="dBar" style="width:0"></i></div>
+      <div id="dChecks"></div>
+      <button type="button" class="add-card" id="dAddCheck">+ Add item</button>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn ghost danger" id="dDelete">Delete card</button>
+      <span style="display:flex;gap:8px"><button type="button" class="btn" id="dCancel">Cancel</button><button class="btn primary" id="dSave" value="save">Save</button></span>
+    </div>
+  </form>
+</dialog>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const KEY = 'ofs.kanban.v1';
+const LABELS = ['red', 'orange', 'yellow', 'green', 'blue', 'violet'];
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'dataset') Object.assign(el.dataset, v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+
+function seed() {
+  const col = (title, cards, limit = 0) => ({ id: uid(), title, limit, cards });
+  const card = (title, extra = {}) => ({ id: uid(), title, desc: '', labels: [], due: '', checks: [], created: Date.now(), ...extra });
+  const soon = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+  const id = uid();
+  return {
+    current: id,
+    boards: [{
+      id, title: 'Launch plan', columns: [
+        col('Backlog', [card('Write the launch post', { labels: ['blue'] }), card('Record a 30-second demo', { labels: ['violet'] })]),
+        col('This week', [card('Pick a domain name', { labels: ['orange'], due: soon }), card('Pricing page copy', {
+          checks: [{ id: uid(), text: 'Draft', done: true }, { id: uid(), text: 'Review with a friend', done: false }],
+        })], 3),
+        col('Doing', [card('Drag me to another column →', { labels: ['green'], desc: 'Cards, columns and checklists are all saved in this browser.' })], 2),
+        col('Done', [card('Cancel the Trello subscription', { labels: ['red'] })]),
+      ],
+    }],
+  };
+}
+
+let state = load() || seed();
+function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.boards && s.boards.length ? s : null; } catch { return null; } }
+function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+const board = () => state.boards.find((b) => b.id === state.current) || state.boards[0];
+function findCard(id) {
+  for (const col of board().columns) { const i = col.cards.findIndex((c) => c.id === id); if (i >= 0) return { col, card: col.cards[i], i }; }
+  return null;
+}
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1800); }
+
+/* ---------- rendering ---------- */
+let filter = '';
+function dueClass(due) {
+  if (!due) return '';
+  const days = (new Date(due + 'T23:59') - Date.now()) / 864e5;
+  return days < 0 ? 'late' : days < 2 ? 'soon' : '';
+}
+function fmtDue(due) { return new Date(due + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+
+function renderCard(c) {
+  const done = c.checks.filter((x) => x.done).length;
+  const el = h('div', { class: 'card', draggable: 'true', tabindex: '0', dataset: { id: c.id }, role: 'button', 'aria-label': c.title },
+    c.labels.length ? h('div', { class: 'labels' }, c.labels.map((l) => h('span', { class: 'lab', style: `background:var(--l-${l})` }))) : null,
+    h('div', { class: 't' }, c.title),
+    (c.due || c.checks.length || c.desc) ? h('div', { class: 'meta' },
+      c.due ? h('span', { class: 'due ' + dueClass(c.due) }, '◷ ' + fmtDue(c.due)) : null,
+      c.checks.length ? h('span', {}, `☑ ${done}/${c.checks.length}`) : null,
+      c.desc ? h('span', { title: 'Has description' }, '≡') : null) : null);
+  el.addEventListener('click', () => openCard(c.id));
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') openCard(c.id); });
+  el.addEventListener('dragstart', (e) => { drag = { type: 'card', id: c.id }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.id); requestAnimationFrame(() => el.classList.add('dragging')); });
+  el.addEventListener('dragend', () => { el.classList.remove('dragging'); clearPlaceholder(); drag = null; });
+  return el;
+}
+
+function renderColumn(col, idx) {
+  const q = filter.toLowerCase();
+  const cards = col.cards.filter((c) => !q || (c.title + ' ' + c.desc).toLowerCase().includes(q));
+  const over = col.limit && col.cards.length > col.limit;
+  const title = h('input', { class: 'col-title', value: col.title, 'aria-label': 'Column name' });
+  title.addEventListener('change', () => { col.title = title.value.trim() || 'Untitled'; save(); });
+  title.addEventListener('keydown', (e) => { if (e.key === 'Enter') title.blur(); });
+  const limitBtn = h('span', { class: 'count' + (over ? ' over' : ''), title: 'Cards / WIP limit (click to set)', style: 'cursor:pointer' },
+    col.limit ? `${col.cards.length}/${col.limit}` : String(col.cards.length));
+  limitBtn.addEventListener('click', () => {
+    const v = prompt(`WIP limit for "${col.title}" (0 = none)`, col.limit || 0);
+    if (v === null) return; col.limit = Math.max(0, parseInt(v, 10) || 0); save(); render();
+  });
+  const del = h('button', { class: 'icon-btn', title: 'Delete column', 'aria-label': 'Delete column' }, '×');
+  del.addEventListener('click', () => {
+    if (col.cards.length && !confirm(`Delete "${col.title}" and its ${col.cards.length} card(s)?`)) return;
+    board().columns.splice(idx, 1); save(); render();
+  });
+  const body = h('div', { class: 'col-body', dataset: { col: col.id } }, cards.map(renderCard));
+  const composerWrap = h('div', { class: 'composer' });
+  const openComposer = () => {
+    composerWrap.replaceChildren();
+    const ta = h('textarea', { placeholder: 'Card title… (Enter to add, Esc to close)', 'aria-label': 'New card title' });
+    const add = () => {
+      const t = ta.value.trim(); if (!t) return;
+      col.cards.push({ id: uid(), title: t, desc: '', labels: [], due: '', checks: [], created: Date.now() });
+      save(); render(); const again = document.querySelector(`.col[data-id="${col.id}"] .add-card`); again && again.click();
+    };
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); add(); }
+      if (e.key === 'Escape') render();
+    });
+    composerWrap.append(ta, h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: add }, 'Add card'), h('button', { class: 'btn ghost', onclick: render }, 'Cancel')));
+    ta.focus();
+  };
+  composerWrap.append(h('button', { class: 'add-card', onclick: openComposer }, '+ Add a card'));
+  const head = h('div', { class: 'col-head', draggable: 'true' }, title, limitBtn, del);
+  const el = h('section', { class: 'col', dataset: { id: col.id }, style: `animation-delay:${idx * 50}ms`, 'aria-label': col.title }, head, body, composerWrap);
+  head.addEventListener('dragstart', (e) => {
+    if (e.target !== head) return;
+    drag = { type: 'col', id: col.id }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', col.id);
+    requestAnimationFrame(() => el.classList.add('dragging-col'));
+  });
+  head.addEventListener('dragend', () => { el.classList.remove('dragging-col'); drag = null; });
+  return el;
+}
+
+function render() {
+  const b = board();
+  const sel = $('#boardSelect');
+  sel.replaceChildren(...state.boards.map((x) => h('option', { value: x.id, selected: x.id === b.id }, x.title)));
+  const main = $('#board');
+  main.replaceChildren(...b.columns.map(renderColumn), h('button', { class: 'add-col', onclick: addColumn }, '+ Add column'));
+  const total = b.columns.reduce((n, c) => n + c.cards.length, 0);
+  $('#stats').textContent = `${b.columns.length} columns · ${total} cards`;
+  document.title = `${b.title} · Board`;
+}
+
+function addColumn() {
+  const t = prompt('Column name', 'New column'); if (!t) return;
+  board().columns.push({ id: uid(), title: t.trim(), limit: 0, cards: [] }); save(); render();
+  $('#board').scrollLeft = 1e6;
+}
+
+/* ---------- drag & drop ---------- */
+let drag = null;
+let ph = null;
+function clearPlaceholder() { if (ph) ph.remove(); ph = null; }
+function insertionIndex(container, y, selector) {
+  const items = [...container.querySelectorAll(selector)].filter((n) => !n.classList.contains('dragging'));
+  for (let i = 0; i < items.length; i++) { const r = items[i].getBoundingClientRect(); if (y < r.top + r.height / 2) return { i, before: items[i] }; }
+  return { i: items.length, before: null };
+}
+const mainEl = $('#board');
+mainEl.addEventListener('dragover', (e) => {
+  if (!drag) return;
+  if (drag.type === 'card') {
+    const body = e.target.closest('.col') && e.target.closest('.col').querySelector('.col-body');
+    if (!body) return;
+    e.preventDefault();
+    if (!ph) ph = h('div', { class: 'placeholder' });
+    const { before } = insertionIndex(body, e.clientY, '.card');
+    if (before) body.insertBefore(ph, before); else body.append(ph);
+  } else {
+    e.preventDefault();
+  }
+});
+mainEl.addEventListener('drop', (e) => {
+  if (!drag) return;
+  e.preventDefault();
+  const b = board();
+  if (drag.type === 'card') {
+    const colEl = e.target.closest('.col'); if (!colEl) return;
+    const to = b.columns.find((c) => c.id === colEl.dataset.id);
+    const found = findCard(drag.id); if (!found || !to) return;
+    // index among rendered (possibly filtered) siblings → index in the full list
+    const body = colEl.querySelector('.col-body');
+    const siblings = [...body.children].filter((n) => n.classList.contains('card') && !n.classList.contains('dragging') || n === ph);
+    const pos = ph ? siblings.indexOf(ph) : siblings.length;
+    found.col.cards.splice(found.i, 1);
+    const afterId = pos > 0 ? siblings[pos - 1].dataset.id : null;
+    const at = afterId ? to.cards.findIndex((c) => c.id === afterId) + 1 : 0;
+    to.cards.splice(Math.max(0, at), 0, found.card);
+  } else {
+    const cols = [...mainEl.querySelectorAll('.col')];
+    let target = cols.length;
+    for (let i = 0; i < cols.length; i++) { const r = cols[i].getBoundingClientRect(); if (e.clientX < r.left + r.width / 2) { target = i; break; } }
+    const from = b.columns.findIndex((c) => c.id === drag.id);
+    const [moved] = b.columns.splice(from, 1);
+    b.columns.splice(target > from ? target - 1 : target, 0, moved);
+  }
+  clearPlaceholder(); drag = null; save(); render();
+});
+
+/* ---------- card dialog ---------- */
+let editing = null;
+let draft = null;
+function openCard(id) {
+  const f = findCard(id); if (!f) return;
+  editing = id; draft = JSON.parse(JSON.stringify(f.card));
+  $('#dTitle').value = draft.title; $('#dDesc').value = draft.desc; $('#dDue').value = draft.due;
+  $('#dCol').replaceChildren(...board().columns.map((c) => h('option', { value: c.id, selected: c.id === f.col.id }, c.title)));
+  renderDraft();
+  $('#cardDlg').showModal();
+}
+function renderDraft() {
+  $('#dLabels').replaceChildren(...LABELS.map((l) => {
+    const b = h('button', { type: 'button', class: 'sw' + (draft.labels.includes(l) ? ' on' : ''), style: `background:var(--l-${l})`, 'aria-pressed': String(draft.labels.includes(l)), 'aria-label': l + ' label' });
+    b.addEventListener('click', () => { draft.labels = draft.labels.includes(l) ? draft.labels.filter((x) => x !== l) : [...draft.labels, l]; renderDraft(); });
+    return b;
+  }));
+  const done = draft.checks.filter((c) => c.done).length;
+  $('#dProg').textContent = draft.checks.length ? `${done}/${draft.checks.length}` : '';
+  $('#dBar').style.width = draft.checks.length ? (done / draft.checks.length * 100) + '%' : '0';
+  $('#dChecks').replaceChildren(...draft.checks.map((ck) => {
+    const cb = h('input', { type: 'checkbox', checked: ck.done, 'aria-label': 'Done' });
+    cb.addEventListener('change', () => { ck.done = cb.checked; renderDraft(); });
+    const tx = h('input', { type: 'text', value: ck.text, 'aria-label': 'Checklist item' });
+    tx.addEventListener('input', () => { ck.text = tx.value; });
+    tx.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCheck(); } });
+    const rm = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remove item' }, '×');
+    rm.addEventListener('click', () => { draft.checks = draft.checks.filter((x) => x !== ck); renderDraft(); });
+    return h('div', { class: 'check' + (ck.done ? ' done' : '') }, cb, tx, rm);
+  }));
+}
+function addCheck() { draft.checks.push({ id: uid(), text: '', done: false }); renderDraft(); const ins = $('#dChecks').querySelectorAll('input[type=text]'); ins[ins.length - 1].focus(); }
+$('#dAddCheck').addEventListener('click', addCheck);
+$('#dCancel').addEventListener('click', () => $('#cardDlg').close());
+$('#dDelete').addEventListener('click', () => {
+  const f = findCard(editing); if (!f) return;
+  if (!confirm('Delete this card?')) return;
+  f.col.cards.splice(f.i, 1); save(); $('#cardDlg').close(); render(); toast('Card deleted');
+});
+$('#cardForm').addEventListener('submit', () => {
+  const f = findCard(editing); if (!f) return;
+  Object.assign(draft, { title: $('#dTitle').value.trim() || draft.title, desc: $('#dDesc').value, due: $('#dDue').value });
+  draft.checks = draft.checks.filter((c) => c.text.trim());
+  const toId = $('#dCol').value;
+  if (toId !== f.col.id) { f.col.cards.splice(f.i, 1); board().columns.find((c) => c.id === toId).cards.push(draft); }
+  else f.col.cards[f.i] = draft;
+  save(); render();
+});
+
+/* ---------- header, menu, keyboard ---------- */
+$('#boardSelect').addEventListener('change', (e) => { state.current = e.target.value; save(); render(); });
+$('#search').addEventListener('input', (e) => { filter = e.target.value; render(); });
+$('#menuBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#menuPop').classList.toggle('open'); });
+document.addEventListener('click', () => $('#menuPop').classList.remove('open'));
+$('#menuPop').addEventListener('click', (e) => {
+  const act = e.target.dataset.act; if (!act) return;
+  if (act === 'new-board') {
+    const t = prompt('Board name', 'New board'); if (!t) return;
+    const id = uid();
+    state.boards.push({ id, title: t.trim(), columns: ['To do', 'Doing', 'Done'].map((x) => ({ id: uid(), title: x, limit: 0, cards: [] })) });
+    state.current = id;
+  } else if (act === 'rename-board') {
+    const t = prompt('Rename board', board().title); if (!t) return; board().title = t.trim();
+  } else if (act === 'delete-board') {
+    if (state.boards.length === 1) return toast('You need at least one board');
+    if (!confirm(`Delete board "${board().title}"? This cannot be undone.`)) return;
+    state.boards = state.boards.filter((b) => b.id !== state.current); state.current = state.boards[0].id;
+  } else if (act === 'export') {
+    const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })), download: `boards-${new Date().toISOString().slice(0, 10)}.json` });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); return toast('Exported');
+  } else if (act === 'import') { return $('#importFile').click(); }
+  save(); render();
+});
+$('#importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data.boards)) throw new Error('not a board export');
+    state = data; save(); render(); toast(`Imported ${data.boards.length} board(s)`);
+  } catch (err) { toast('Import failed: ' + err.message); }
+  e.target.value = '';
+});
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, textarea, select, dialog')) return;
+  if (e.key === '/') { e.preventDefault(); $('#search').focus(); }
+  if (e.key.toLowerCase() === 'n') { e.preventDefault(); const b = document.querySelector('.col .add-card'); b && b.click(); }
+});
+window.addEventListener('storage', (e) => { if (e.key === KEY) { state = load() || state; render(); } });
+
+document.body.classList.add('intro');
+render();
+setTimeout(() => document.body.classList.remove('intro'), 700);
+</script>
+</body>
+</html>

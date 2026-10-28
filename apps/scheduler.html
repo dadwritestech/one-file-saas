@@ -1,0 +1,526 @@
+<!doctype html>
+<!--
+  one-file-saas · Slots
+  Replaces: a Calendly-like scheduling link (Calendly Standard, ~$120/yr)
+  How it works without a server: your availability is compressed into the booking link itself
+  (#book=…). Put this file on any static host (GitHub Pages, Netlify drop, your own site), share the
+  link, and people pick a time. They get an .ics invite and send you a booking code; paste it here
+  and that slot is marked busy in the next link you share.
+  Data: localStorage key "ofs.scheduler.v1". Export/Import JSON in Settings. No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slots · one-file-saas</title>
+<style>
+  :root {
+    --bg: #f5f1e8; --panel: #fffcf5; --ink: #1b2a24; --ink-2: #4d5c55; --ink-3: #8a968f; --line: #e2dccd;
+    --accent: #0f5c45; --accent-2: #d8eadf; --warm: #c8642c; --err: #b42318;
+    --serif: "Iowan Old Style", "Sitka Text", "Charter", "Palatino Linotype", Georgia, serif;
+    --sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111815; --panel: #18211d; --ink: #e8efe9; --ink-2: #aab8b0; --ink-3: #6c7a73; --line: #2a3631; --accent: #5cc49b; --accent-2: #1d3a2f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); min-height: 100vh; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  .hidden { display: none !important; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 60px; }
+  .top { display: flex; align-items: baseline; gap: 14px; margin-bottom: 26px; }
+  .logo { font: italic 600 30px var(--serif); color: var(--accent); }
+  .logo b { font-style: normal; color: var(--warm); }
+  .tag { color: var(--ink-3); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .panel + .panel { margin-top: 18px; }
+  .panel h2 { font-size: 21px; margin-bottom: 4px; }
+  .sub { color: var(--ink-2); font-size: 13.5px; margin: 0 0 16px; }
+  label.f { display: grid; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 12px; }
+  input[type=text], input[type=email], input[type=number], input[type=time], select, textarea {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 9px 11px; font-size: 14.5px; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row > * { flex: 1; }
+  .btn { border: 1px solid var(--accent); background: var(--accent); color: var(--panel); padding: 9px 16px; border-radius: 999px; font-weight: 600; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.alt { background: transparent; color: var(--accent); }
+  .btn.small { padding: 5px 12px; font-size: 13px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .x { border: 0; background: none; color: var(--ink-3); font-size: 18px; padding: 0 6px; }
+  .x:hover { color: var(--err); }
+
+  .days { display: grid; gap: 6px; }
+  .day { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .day:last-child { border-bottom: 0; }
+  .day .nm { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  .ranges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .range { display: flex; gap: 4px; align-items: center; }
+  .range input { width: 104px; padding: 5px 7px; }
+  .off { color: var(--ink-3); font-style: italic; font-size: 13.5px; }
+  .types { display: grid; gap: 10px; }
+  .type { border: 1px solid var(--line); border-left: 5px solid var(--c, var(--accent)); border-radius: 10px; padding: 12px 14px; background: var(--bg); }
+  .type .row input[type=text] { font-weight: 600; }
+  .type .row select { max-width: 120px; }
+  .colors { display: flex; gap: 5px; }
+  .colors button { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; }
+  .colors button.on { border-color: var(--ink); }
+
+  .linkbox { display: flex; gap: 8px; background: var(--accent-2); border-radius: 10px; padding: 10px; align-items: center; }
+  .linkbox code { flex: 1; min-width: 0; font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+  .note { font-size: 12.5px; color: var(--ink-3); margin-top: 8px; }
+  .bk { display: grid; grid-template-columns: 6px 1fr auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: center; }
+  .bk:last-child { border-bottom: 0; }
+  .bk .bar { align-self: stretch; border-radius: 3px; background: var(--c, var(--accent)); }
+  .bk .when { font-family: var(--serif); font-size: 16px; }
+  .bk .who { font-size: 13px; color: var(--ink-2); }
+  .empty { color: var(--ink-3); font-style: italic; padding: 8px 0; }
+
+  /* ---------- booking page ---------- */
+  .book { max-width: 980px; margin: 40px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; display: grid; grid-template-columns: 300px 1fr; min-height: 560px; overflow: hidden; box-shadow: 0 30px 60px -40px rgba(15,40,30,.45); }
+  .book aside { padding: 30px 26px; border-right: 1px solid var(--line); background: linear-gradient(180deg, var(--accent-2), transparent 60%); }
+  .host { font-size: 13px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; }
+  .book aside h1 { font-size: 30px; line-height: 1.15; margin: 8px 0 14px; }
+  .facts { display: grid; gap: 8px; color: var(--ink-2); font-size: 14px; margin-top: 14px; }
+  .facts span::before { content: attr(data-i); display: inline-block; width: 22px; color: var(--accent); }
+  .pick-type { display: grid; gap: 8px; margin-top: 18px; }
+  .pick-type button { text-align: left; border: 1px solid var(--line); background: var(--panel); border-left: 5px solid var(--c); border-radius: 10px; padding: 10px 12px; }
+  .pick-type button.on { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
+  .pick-type small { display: block; color: var(--ink-3); }
+  .stage { padding: 28px 30px; display: grid; grid-template-columns: 1fr 210px; gap: 26px; }
+  .stage h2 { font-size: 21px; margin-bottom: 16px; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .cal-head b { font-family: var(--serif); font-size: 17px; font-weight: 600; }
+  .nav { border: 0; background: var(--accent-2); color: var(--accent); width: 34px; height: 34px; border-radius: 50%; font-size: 16px; }
+  .nav:disabled { opacity: .3; }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; }
+  .cal .dow { font-size: 11px; font-weight: 700; color: var(--ink-3); letter-spacing: .08em; padding-bottom: 6px; }
+  .cal button { aspect-ratio: 1; border: 0; border-radius: 50%; background: none; font-size: 14.5px; color: var(--ink-3); cursor: default; position: relative; }
+  .cal button.avail { background: var(--accent-2); color: var(--accent); font-weight: 700; cursor: pointer; }
+  .cal button.avail:hover { background: var(--accent); color: var(--panel); }
+  .cal button.sel { background: var(--accent); color: var(--panel); }
+  .cal button.today::after { content: ''; position: absolute; bottom: 6px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: currentColor; }
+  .tz { margin-top: 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 4px; }
+  .tz select { padding: 6px 8px; font-size: 13px; }
+  .slots { display: grid; gap: 8px; align-content: start; max-height: 470px; overflow-y: auto; padding-right: 4px; }
+  .slots .dayname { font-family: var(--serif); font-size: 16px; margin-bottom: 4px; }
+  .slot { display: flex; gap: 6px; }
+  .slot button { flex: 1; border: 1px solid var(--accent); color: var(--accent); background: none; border-radius: 8px; padding: 11px 0; font-weight: 700; transition: flex .15s; }
+  .slot button:hover { border-width: 2px; padding: 10px 0; }
+  .slot.chosen button:first-child { background: var(--ink-2); border-color: var(--ink-2); color: var(--panel); }
+  .slot .go { display: none; background: var(--accent); color: var(--panel); }
+  .slot.chosen .go { display: block; }
+  .form { grid-column: 1 / -1; max-width: 460px; animation: fade .25s; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+  .back { border: 0; background: none; color: var(--accent); padding: 0; margin-bottom: 10px; font-weight: 600; }
+  .done { grid-column: 1 / -1; text-align: center; padding: 30px 10px; animation: fade .3s; }
+  .done .tick { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: var(--panel); font-size: 32px; display: grid; place-items: center; margin: 0 auto 16px; }
+  .done h2 { font-size: 26px; }
+  .code { font: 12px var(--mono); background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 10px; word-break: break-all; margin: 14px auto; max-width: 480px; text-align: left; }
+  .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .err { color: var(--err); font-size: 13px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translate(-50%, 90px); opacity: 0; background: var(--ink); color: var(--panel); padding: 10px 18px; border-radius: 999px; transition: transform .25s; font-weight: 600; z-index: 9; }
+  .toast.show { transform: translate(-50%, 0); opacity: 1; }
+  footer { text-align: center; color: var(--ink-3); font-size: 12px; padding: 10px; }
+  @media (max-width: 860px) {
+    .grid, .book, .stage { grid-template-columns: 1fr; }
+    .book aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast" role="status"></div>
+<script>
+'use strict';
+const KEY = 'ofs.scheduler.v1';
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const COLORS = ['#0f5c45', '#c8642c', '#3559c7', '#9c3d8f', '#b08900'];
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2000); }
+
+/* ---------- state ---------- */
+function defaults() {
+  const week = {};
+  for (let d = 0; d < 7; d++) week[d] = d >= 1 && d <= 5 ? [['09:00', '12:00'], ['13:00', '17:00']] : [];
+  return {
+    id: uid(), name: 'Your Name', tz: localTz, notice: 4, ahead: 30, buffer: 0, week,
+    types: [
+      { id: uid(), name: 'Intro call', mins: 30, color: COLORS[0], desc: 'A quick call to see if we should work together.' },
+      { id: uid(), name: 'Deep dive', mins: 60, color: COLORS[1], desc: 'An hour to go through your project in detail.' },
+    ],
+    bookings: [],
+  };
+}
+function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+let state = load() || defaults();
+function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+/* ---------- link encoding (deflate + base64url, so links stay short) ---------- */
+const b64u = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+async function pack(obj) {
+  const raw = new TextEncoder().encode(JSON.stringify(obj));
+  if (!('CompressionStream' in window)) return 'j' + b64u(raw);
+  const buf = await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer();
+  return 'z' + b64u(new Uint8Array(buf));
+}
+async function unpack(str) {
+  const bytes = unb64u(str.slice(1));
+  const raw = str[0] === 'z' ? new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()) : bytes;
+  return JSON.parse(new TextDecoder().decode(raw));
+}
+function publicConfig() {
+  const now = Date.now();
+  return {
+    v: 1, id: state.id, name: state.name, tz: state.tz, notice: state.notice, ahead: state.ahead, buffer: state.buffer, week: state.week,
+    types: state.types.map(({ id, name, mins, color, desc }) => ({ id, name, mins, color, desc })),
+    busy: state.bookings.filter((b) => b.end > now).map((b) => [b.start, b.end]),
+  };
+}
+
+/* ---------- time zone math ---------- */
+const partsCache = new Map();
+function tzParts(ts, tz) {
+  let f = partsCache.get(tz);
+  if (!f) { f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'short' }); partsCache.set(tz, f); }
+  const o = {};
+  for (const p of f.formatToParts(ts)) o[p.type] = p.value;
+  return { y: +o.year, m: +o.month, d: +o.day, hh: +o.hour, mm: +o.minute, ss: +o.second, dow: DOW.indexOf(o.weekday) };
+}
+function tzOffset(ts, tz) { const p = tzParts(ts, tz); return Date.UTC(p.y, p.m - 1, p.d, p.hh, p.mm, p.ss) - Math.floor(ts / 1000) * 1000; }
+// Wall-clock time in `tz` → UTC timestamp. Two passes handle DST transitions.
+function zoned(y, m, d, hh, mm, tz) {
+  const guess = Date.UTC(y, m - 1, d, hh, mm);
+  let ts = guess - tzOffset(guess, tz);
+  ts = guess - tzOffset(ts, tz);
+  return ts;
+}
+const toMin = (s) => { const [a, b] = s.split(':').map(Number); return a * 60 + b; };
+const dayKey = (ts, tz) => { const p = tzParts(ts, tz); return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`; };
+
+// All bookable start times for an event type, grouped by the viewer's local date.
+function computeSlots(cfg, type, viewTz) {
+  const now = Date.now();
+  const earliest = now + cfg.notice * 3600e3;
+  const latest = now + cfg.ahead * 864e5;
+  const step = type.mins < 30 ? type.mins : 30;
+  const busy = cfg.busy || [];
+  const byDay = new Map();
+  const start = tzParts(now, cfg.tz);
+  for (let i = 0; i <= cfg.ahead + 1; i++) {
+    const anchor = new Date(Date.UTC(start.y, start.m - 1, start.d + i));
+    const y = anchor.getUTCFullYear(), m = anchor.getUTCMonth() + 1, d = anchor.getUTCDate();
+    const ranges = cfg.week[anchor.getUTCDay()] || [];
+    for (const [a, b] of ranges) {
+      for (let t = toMin(a); t + type.mins <= toMin(b); t += step) {
+        const s = zoned(y, m, d, Math.floor(t / 60), t % 60, cfg.tz);
+        const e = s + type.mins * 60e3;
+        if (s < earliest || s > latest) continue;
+        const pad = cfg.buffer * 60e3;
+        if (busy.some(([bs, be]) => s < be + pad && e > bs - pad)) continue;
+        const k = dayKey(s, viewTz);
+        if (!byDay.has(k)) byDay.set(k, []);
+        byDay.get(k).push(s);
+      }
+    }
+  }
+  for (const v of byDay.values()) v.sort((a, b) => a - b);
+  return byDay;
+}
+const fmtTime = (ts, tz) => new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(ts);
+const fmtDay = (ts, tz) => new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }).format(ts);
+
+/* ---------- .ics ---------- */
+function ics({ start, end, title, desc, organizer }) {
+  const z = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const esc = (s) => String(s || '').replace(/[\\;,]/g, (c) => '\\' + c).replace(/\n/g, '\\n');
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//one-file-saas//Slots//EN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+    `UID:${uid()}@one-file-saas`, `DTSTAMP:${z(Date.now())}`, `DTSTART:${z(start)}`, `DTEND:${z(end)}`,
+    `SUMMARY:${esc(title)}`, `DESCRIPTION:${esc(desc)}`, `ORGANIZER;CN=${esc(organizer)}:invalid:nomail`, 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+}
+function download(name, text, type) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* =================== HOST VIEW =================== */
+async function renderHost() {
+  const app = $('#app');
+  app.replaceChildren();
+  const persist = () => { save(); refreshLink(); };
+
+  const settings = h('div', { class: 'panel' },
+    h('h2', {}, 'Your availability'),
+    h('p', { class: 'sub' }, 'Weekly hours in your time zone. Bookers see them converted to theirs.'),
+    h('div', { class: 'row' },
+      field('Your name', h('input', { type: 'text', value: state.name, id: 'hostName', oninput: (e) => { state.name = e.target.value; persist(); } })),
+      field('Your time zone', tzSelect(state.tz, (v) => { state.tz = v; persist(); }))),
+    h('div', { class: 'days' }, [1, 2, 3, 4, 5, 6, 0].map(dayRow)),
+    h('div', { class: 'row', style: 'margin-top:14px' },
+      field('Minimum notice (hours)', numIn(state.notice, 0, 720, (v) => { state.notice = v; persist(); })),
+      field('Book up to (days ahead)', numIn(state.ahead, 1, 365, (v) => { state.ahead = v; persist(); })),
+      field('Buffer between (min)', numIn(state.buffer, 0, 120, (v) => { state.buffer = v; persist(); }))));
+
+  const types = h('div', { class: 'panel' },
+    h('h2', {}, 'Event types'),
+    h('p', { class: 'sub' }, 'Each one is a choice on your booking page.'),
+    h('div', { class: 'types', id: 'types' }),
+    h('button', { class: 'btn alt small', style: 'margin-top:12px', onclick: () => { state.types.push({ id: uid(), name: 'New meeting', mins: 30, color: COLORS[state.types.length % COLORS.length], desc: '' }); persist(); drawTypes(); } }, '+ Add event type'));
+
+  const link = h('div', { class: 'panel' },
+    h('h2', {}, 'Your booking link'),
+    h('p', { class: 'sub' }, 'Everything a booker needs is inside this link. It updates as you edit.'),
+    h('div', { class: 'linkbox' }, h('code', { id: 'link' }, '…'),
+      h('button', { class: 'btn small', id: 'copyLink', onclick: async () => { try { await navigator.clipboard.writeText($('#link').textContent); toast('Link copied'); } catch { toast('Select the link and copy it'); } } }, 'Copy')),
+    h('div', { class: 'row', style: 'margin-top:10px' }, h('a', { class: 'btn alt small', id: 'openLink', href: '#', style: 'text-align:center;text-decoration:none', target: '_blank' }, 'Open booking page ↗')),
+    h('p', { class: 'note' }, 'Host this file on any static site so others can open the link. On file:// only you can.'));
+
+  const bookings = h('div', { class: 'panel' },
+    h('h2', {}, 'Bookings'),
+    h('p', { class: 'sub' }, 'Bookers send you a code. Paste it here; that time becomes busy in your link.'),
+    h('div', { class: 'row' }, h('input', { type: 'text', id: 'codeIn', placeholder: 'Paste a booking code (SLOT-…)' }), h('button', { class: 'btn small', style: 'flex:0', onclick: importCode }, 'Add')),
+    h('div', { id: 'bookList', style: 'margin-top:10px' }),
+    h('div', { class: 'row', style: 'margin-top:14px;gap:8px' },
+      h('button', { class: 'btn alt small', onclick: () => download(`slots-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state, null, 2), 'application/json') }, 'Export JSON'),
+      h('button', { class: 'btn alt small', onclick: () => $('#imp').click() }, 'Import JSON'),
+      h('input', { type: 'file', id: 'imp', class: 'hidden', accept: '.json', onchange: importJson })));
+
+  app.append(h('div', { class: 'wrap' },
+    h('div', { class: 'top' }, h('span', { class: 'logo' }, 'Slots', h('b', {}, '.')), h('span', { class: 'tag' }, 'A scheduling link with no account and no server.')),
+    h('div', { class: 'grid' }, h('div', {}, settings, types), h('div', {}, link, bookings))),
+    h('footer', {}, 'one-file-saas · your data stays in this browser'));
+  drawTypes(); drawBookings(); refreshLink();
+
+  function field(label, input) { return h('label', { class: 'f' }, label, input); }
+  function numIn(v, min, max, cb) { return h('input', { type: 'number', value: v, min, max, onchange: (e) => cb(Math.min(max, Math.max(min, +e.target.value || 0))) }); }
+  function dayRow(d) {
+    const ranges = state.week[d];
+    const box = h('div', { class: 'ranges' });
+    const draw = () => {
+      box.replaceChildren();
+      if (!ranges.length) box.append(h('span', { class: 'off' }, 'Unavailable'));
+      ranges.forEach((r, i) => {
+        const a = h('input', { type: 'time', value: r[0], 'aria-label': `${DOW[d]} from`, onchange: (e) => { r[0] = e.target.value; persist(); } });
+        const b = h('input', { type: 'time', value: r[1], 'aria-label': `${DOW[d]} to`, onchange: (e) => { r[1] = e.target.value; persist(); } });
+        box.append(h('span', { class: 'range' }, a, '–', b, h('button', { class: 'x', title: 'Remove', onclick: () => { ranges.splice(i, 1); persist(); draw(); sync(); } }, '×')));
+      });
+      box.append(h('button', { class: 'x', title: 'Add hours', style: 'color:var(--accent)', onclick: () => { const last = ranges[ranges.length - 1]; ranges.push(last ? [last[1], '18:00'] : ['09:00', '17:00']); persist(); draw(); sync(); } }, '+'));
+    };
+    const cb = h('input', { type: 'checkbox', checked: ranges.length > 0, 'aria-label': DOW[d] + ' available', onchange: (e) => { if (e.target.checked) ranges.push(['09:00', '17:00']); else ranges.length = 0; persist(); draw(); } });
+    const sync = () => { cb.checked = ranges.length > 0; };
+    draw();
+    return h('div', { class: 'day' }, h('label', { class: 'nm' }, cb, DOW[d]), box);
+  }
+}
+
+function tzSelect(value, cb) {
+  const zones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [value];
+  if (!zones.includes(value)) zones.unshift(value);
+  return h('select', { onchange: (e) => cb(e.target.value) }, zones.map((z) => h('option', { value: z, selected: z === value }, z.replace(/_/g, ' '))));
+}
+
+function drawTypes() {
+  const box = $('#types');
+  box.replaceChildren(...state.types.map((t) => {
+    const persist = () => { save(); refreshLink(); };
+    const el = h('div', { class: 'type', style: `--c:${t.color}` },
+      h('div', { class: 'row' },
+        h('input', { type: 'text', value: t.name, 'aria-label': 'Event name', oninput: (e) => { t.name = e.target.value; persist(); } }),
+        h('select', { 'aria-label': 'Duration', onchange: (e) => { t.mins = +e.target.value; persist(); } }, [15, 20, 30, 45, 60, 90, 120].map((m) => h('option', { value: m, selected: m === t.mins }, `${m} min`))),
+        h('div', { class: 'colors', style: 'flex:0' }, COLORS.map((c) => h('button', { class: c === t.color ? 'on' : '', style: `background:${c}`, 'aria-label': 'Color ' + c, onclick: () => { t.color = c; persist(); drawTypes(); } }))),
+        h('button', { class: 'x', style: 'flex:0', title: 'Delete', onclick: () => { if (state.types.length === 1) return toast('Keep at least one event type'); state.types = state.types.filter((x) => x !== t); persist(); drawTypes(); } }, '×')),
+      h('input', { type: 'text', value: t.desc, placeholder: 'Short description', style: 'margin-top:8px;font-size:13.5px', 'aria-label': 'Description', oninput: (e) => { t.desc = e.target.value; persist(); } }));
+    return el;
+  }));
+}
+
+function drawBookings() {
+  const box = $('#bookList');
+  const list = [...state.bookings].sort((a, b) => a.start - b.start);
+  const now = Date.now();
+  if (!list.length) return box.replaceChildren(h('div', { class: 'empty' }, 'No bookings yet. Open your booking page and try one.'));
+  box.replaceChildren(...list.map((b) => h('div', { class: 'bk', style: `--c:${b.color || 'var(--accent)'};${b.end < now ? 'opacity:.5' : ''}` },
+    h('span', { class: 'bar' }),
+    h('div', {}, h('div', { class: 'when' }, `${fmtDay(b.start, state.tz)}, ${fmtTime(b.start, state.tz)}`),
+      h('div', { class: 'who' }, `${b.type} · ${b.name} <${b.email}>${b.notes ? ' · “' + b.notes + '”' : ''}`)),
+    h('button', { class: 'x', title: 'Cancel booking', onclick: () => { if (!confirm('Remove this booking? The time becomes free again.')) return; state.bookings = state.bookings.filter((x) => x !== b); save(); drawBookings(); refreshLink(); } }, '×'))));
+}
+
+let linkSeq = 0;
+async function refreshLink() {
+  const seq = ++linkSeq;
+  const url = location.href.split('#')[0] + '#book=' + await pack(publicConfig());
+  if (seq !== linkSeq || !$('#link')) return;
+  $('#link').textContent = url;
+  $('#openLink').href = url;
+}
+
+async function importCode() {
+  const raw = $('#codeIn').value.trim().replace(/^SLOT-/, '');
+  try {
+    const b = await unpack(raw);
+    if (!b.start || !b.end || !b.email) throw new Error('missing fields');
+    if (b.host !== state.id) toast('Note: this code was made from a different link');
+    if (state.bookings.some((x) => x.ref === b.ref)) return toast('Already added');
+    state.bookings.push(b); save(); drawBookings(); refreshLink(); $('#codeIn').value = ''; toast('Booking added');
+  } catch { toast('That does not look like a booking code'); }
+}
+async function importJson(e) {
+  const file = e.target.files[0]; if (!file) return;
+  try { const d = JSON.parse(await file.text()); if (!d.week || !d.types) throw 0; state = d; save(); renderHost(); toast('Imported'); }
+  catch { toast('Import failed: not a Slots export'); }
+}
+
+/* =================== BOOKER VIEW =================== */
+async function renderBooker(payload) {
+  let cfg;
+  try { cfg = await unpack(payload); } catch {
+    $('#app').replaceChildren(h('div', { class: 'wrap' }, h('div', { class: 'panel' }, h('h2', {}, 'This booking link is broken'), h('p', { class: 'sub' }, 'Ask the sender for a fresh link.'))));
+    return;
+  }
+  // When the host opens their own link in this browser, bookings land directly in their list.
+  const isHost = state.id === cfg.id;
+  if (isHost) cfg.busy = publicConfig().busy;
+  const v = { type: cfg.types[0], tz: localTz, month: null, day: null, slot: null, step: 'pick' };
+  let slots = new Map();
+
+  const app = $('#app');
+  const aside = h('aside');
+  const stage = h('div', { class: 'stage' });
+  app.replaceChildren(h('div', { class: 'book' }, aside, stage), h('footer', {}, 'Scheduled with Slots · one-file-saas · nothing is sent anywhere until you send it'));
+
+  function recompute() {
+    slots = computeSlots(cfg, v.type, v.tz);
+    const first = [...slots.keys()].sort()[0];
+    if (!v.month) v.month = (first || dayKey(Date.now(), v.tz)).slice(0, 7);
+    if (v.day && !slots.has(v.day)) v.day = null;
+  }
+  function drawAside() {
+    aside.replaceChildren(
+      h('div', { class: 'host' }, cfg.name),
+      h('h1', {}, v.type.name),
+      h('p', { style: 'color:var(--ink-2);margin:0' }, v.type.desc),
+      h('div', { class: 'facts' }, h('span', { 'data-i': '◷' }, `${v.type.mins} minutes`), h('span', { 'data-i': '◎' }, 'Details after booking'),
+        v.slot ? h('span', { 'data-i': '▣', style: 'color:var(--ink);font-weight:600' }, `${fmtDay(v.slot, v.tz)}, ${fmtTime(v.slot, v.tz)}`) : null),
+      cfg.types.length > 1 && v.step === 'pick' ? h('div', { class: 'pick-type' }, cfg.types.map((t) => h('button', {
+        class: t === v.type ? 'on' : '', style: `--c:${t.color}`, onclick: () => { v.type = t; v.slot = null; recompute(); draw(); },
+      }, h('b', {}, t.name), h('small', {}, `${t.mins} min`)))) : null);
+  }
+  function drawPick() {
+    const [yy, mm] = v.month.split('-').map(Number);
+    const first = new Date(Date.UTC(yy, mm - 1, 1));
+    const daysIn = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    const lead = (first.getUTCDay() + 6) % 7;
+    const today = dayKey(Date.now(), v.tz);
+    const keys = [...slots.keys()].sort();
+    const minMonth = (keys[0] || today).slice(0, 7), maxMonth = (keys[keys.length - 1] || today).slice(0, 7);
+    const shift = (n) => { const d = new Date(Date.UTC(yy, mm - 1 + n, 1)); v.month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; draw(); };
+    const cal = h('div', { class: 'cal', role: 'grid' }, ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map((d) => h('div', { class: 'dow' }, d)));
+    for (let i = 0; i < lead; i++) cal.append(h('span'));
+    for (let d = 1; d <= daysIn; d++) {
+      const k = `${v.month}-${String(d).padStart(2, '0')}`;
+      const has = slots.has(k);
+      cal.append(h('button', {
+        class: [has && 'avail', k === v.day && 'sel', k === today && 'today'].filter(Boolean).join(' '), disabled: !has,
+        'aria-label': has ? `${k}, ${slots.get(k).length} times available` : k, 'data-day': k, onclick: () => { v.day = k; v.slot = null; draw(); },
+      }, String(d)));
+    }
+    const left = h('div', {},
+      h('h2', {}, 'Pick a day'),
+      h('div', { class: 'cal-head' },
+        h('button', { class: 'nav', 'aria-label': 'Previous month', disabled: v.month <= minMonth, onclick: () => shift(-1) }, '‹'),
+        h('b', {}, new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(first)),
+        h('button', { class: 'nav', 'aria-label': 'Next month', disabled: v.month >= maxMonth, onclick: () => shift(1) }, '›')),
+      cal,
+      keys.length ? null : h('p', { class: 'sub', style: 'margin-top:14px' }, 'No open times right now.'),
+      h('label', { class: 'tz' }, 'Times shown in', tzSelect(v.tz, (z) => { v.tz = z; v.month = null; recompute(); draw(); })));
+    const right = h('div', { class: 'slots', 'aria-label': 'Available times' });
+    if (v.day) {
+      const any = slots.get(v.day)[0];
+      right.append(h('div', { class: 'dayname' }, fmtDay(any, v.tz)));
+      for (const s of slots.get(v.day)) {
+        const row = h('div', { class: 'slot' + (s === v.slot ? ' chosen' : '') },
+          h('button', { onclick: () => { v.slot = s; draw(); } }, fmtTime(s, v.tz)),
+          h('button', { class: 'go', onclick: () => { v.step = 'form'; draw(); } }, 'Next'));
+        right.append(row);
+      }
+    } else right.append(h('p', { class: 'sub' }, 'Select a highlighted day to see times.'));
+    stage.replaceChildren(left, right);
+  }
+  function drawForm() {
+    const err = h('div', { class: 'err' });
+    const form = h('form', { class: 'form', onsubmit: async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const name = fd.get('name').trim(), email = fd.get('email').trim();
+      if (!name || !/^\S+@\S+\.\S+$/.test(email)) { err.textContent = 'Please enter your name and a valid email.'; return; }
+      const booking = { ref: uid(), host: cfg.id, type: v.type.name, color: v.type.color, start: v.slot, end: v.slot + v.type.mins * 60e3, name, email, notes: fd.get('notes').trim(), made: Date.now() };
+      v.booking = booking; v.code = 'SLOT-' + await pack(booking);
+      if (isHost) { state.bookings.push(booking); save(); }
+      v.step = 'done'; draw();
+    } },
+      h('button', { class: 'back', type: 'button', onclick: () => { v.step = 'pick'; draw(); } }, '← Back'),
+      h('h2', {}, 'Your details'),
+      h('label', { class: 'f' }, 'Name', h('input', { type: 'text', name: 'name', required: true, autocomplete: 'name' })),
+      h('label', { class: 'f' }, 'Email', h('input', { type: 'email', name: 'email', required: true, autocomplete: 'email' })),
+      h('label', { class: 'f' }, 'Anything to prepare? (optional)', h('textarea', { name: 'notes' })),
+      err,
+      h('button', { class: 'btn', type: 'submit' }, 'Confirm booking'));
+    stage.replaceChildren(form);
+    form.querySelector('input').focus();
+  }
+  function drawDone() {
+    const b = v.booking;
+    const title = `${v.type.name} with ${cfg.name}`;
+    const mail = `mailto:?subject=${encodeURIComponent('Booked: ' + title)}&body=${encodeURIComponent(`Hi ${cfg.name},\n\nI booked "${v.type.name}" for ${fmtDay(b.start, cfg.tz)}, ${fmtTime(b.start, cfg.tz)} (${cfg.tz}).\n\nBooking code (paste it into Slots):\n${v.code}\n\n${b.name}`)}`;
+    stage.replaceChildren(h('div', { class: 'done' },
+      h('div', { class: 'tick' }, '✓'),
+      h('h2', {}, 'You are booked'),
+      h('p', { class: 'sub' }, `${fmtDay(b.start, v.tz)} · ${fmtTime(b.start, v.tz)}–${fmtTime(b.end, v.tz)} (${v.tz.replace(/_/g, ' ')})`),
+      isHost ? h('p', { class: 'sub', style: 'color:var(--accent);font-weight:600' }, 'This is your own link, so the booking was added to your list.')
+        : h('p', { class: 'sub' }, `Last step: send this code to ${cfg.name} so the time is reserved.`),
+      h('div', { class: 'code', id: 'bookingCode' }, v.code),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => download('invite.ics', ics({ start: b.start, end: b.end, title, desc: b.notes, organizer: cfg.name }), 'text/calendar') }, 'Add to calendar (.ics)'),
+        h('a', { class: 'btn alt', href: mail, style: 'text-decoration:none' }, 'Email the code'),
+        h('button', { class: 'btn alt', onclick: async () => { try { await navigator.clipboard.writeText(v.code); toast('Code copied'); } catch { toast('Select the code and copy it'); } } }, 'Copy code'))));
+  }
+  function draw() {
+    drawAside();
+    if (v.step === 'pick') drawPick(); else if (v.step === 'form') drawForm(); else drawDone();
+  }
+  recompute(); draw();
+}
+
+/* ---------- router ---------- */
+function route() {
+  const m = location.hash.match(/^#book=(.+)$/);
+  if (m) renderBooker(m[1]); else renderHost();
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>

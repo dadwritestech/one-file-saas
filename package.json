@@ -1,0 +1,16 @@
+{
+  "name": "one-file-saas",
+  "version": "1.0.0",
+  "description": "Paid SaaS products rebuilt as single self-contained HTML files.",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "playwright test"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
+  }
+}
