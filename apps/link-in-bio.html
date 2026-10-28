@@ -1,0 +1,372 @@
+<!doctype html>
+<!--
+  one-file-saas · Stack
+  Replaces: a Linktree-like link-in-bio page (Linktree Pro, ~$108/yr)
+  Edit on the left, see the phone preview on the right, then "Download page" to get a
+  ~10 KB index.html with no JavaScript. Upload it to any static host (GitHub Pages, Netlify,
+  Cloudflare Pages, your own server) and put that URL in your bio.
+  The preview IS the exported file (rendered in an iframe), so what you see is what you ship.
+  Data: localStorage key "ofs.linkinbio.v1". Export/Import JSON below the editor. No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack · one-file-saas</title>
+<style>
+  :root {
+    --bg: #101113; --panel: #18191c; --panel-2: #202226; --ink: #f2f2ee; --ink-2: #a5a7ad; --ink-3: #6b6e76; --line: #2b2e33;
+    --lime: #c6f432; --pink: #ff6fb5;
+    --sans: "Segoe UI Variable Display", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.5 var(--sans); min-height: 100vh; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
+  .hidden { display: none !important; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 460px; min-height: 100vh; }
+  .edit { padding: 26px 34px 60px; max-width: 760px; width: 100%; justify-self: end; }
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .logo { font: 800 24px var(--sans); letter-spacing: -0.03em; display: flex; align-items: center; gap: 8px; }
+  .logo i { display: inline-grid; gap: 2px; }
+  .logo i b { display: block; width: 18px; height: 4px; background: var(--lime); border-radius: 2px; }
+  .logo i b:nth-child(2) { background: var(--pink); width: 14px; }
+  .logo i b:nth-child(3) { width: 10px; background: var(--ink); }
+  .grow { flex: 1; }
+  .btn { border: 0; background: var(--lime); color: #111; padding: 9px 16px; border-radius: 999px; font-weight: 700; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.alt { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); }
+  .btn.small { padding: 5px 12px; font-size: 13px; }
+  .sec { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin-bottom: 14px; }
+  .sec h3 { margin: 0 0 12px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+  .profile { display: grid; grid-template-columns: 92px 1fr; gap: 16px; align-items: start; }
+  .avatar { width: 92px; height: 92px; border-radius: 50%; background: var(--panel-2) center/cover; border: 2px dashed var(--line); display: grid; place-items: center; color: var(--ink-3); font-size: 12px; cursor: pointer; text-align: center; position: relative; }
+  .avatar.has { border-style: solid; border-color: var(--lime); }
+  .avatar .rm { position: absolute; top: -4px; right: -4px; width: 22px; height: 22px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; line-height: 1; padding: 0; }
+  input[type=text], input[type=url], textarea, select { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+  input:focus, textarea:focus, select:focus { border-color: var(--lime); outline: none; }
+  textarea { resize: vertical; min-height: 60px; }
+  .stack { display: grid; gap: 8px; }
+  .link { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; transition: opacity .15s, transform .15s; }
+  .link.off { opacity: .45; }
+  .link.dragging { opacity: .3; }
+  .link.over { transform: translateY(4px); border-color: var(--lime); }
+  .grip { cursor: grab; color: var(--ink-3); font-size: 16px; text-align: center; user-select: none; }
+  .link .fields { display: grid; gap: 6px; }
+  .link .fields input { padding: 6px 10px; background: var(--panel); }
+  .link .fields input.t { font-weight: 700; }
+  .link .ctl { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .toggle { width: 38px; height: 22px; border-radius: 999px; background: var(--line); border: 0; position: relative; padding: 0; }
+  .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--ink-2); transition: left .15s, background .15s; }
+  .toggle.on { background: var(--lime); }
+  .toggle.on::after { left: 19px; background: #111; }
+  .icon { border: 0; background: none; color: var(--ink-3); font-size: 15px; padding: 2px 4px; border-radius: 6px; }
+  .icon:hover { color: var(--ink); background: var(--panel); }
+  .icon.star.on { color: var(--lime); }
+  .bad { border-color: var(--pink) !important; }
+  .socials { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .socials label { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; }
+  .socials input { padding: 6px 10px; }
+  .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  .theme { border: 2px solid transparent; border-radius: 12px; padding: 0; overflow: hidden; background: none; text-align: left; }
+  .theme.on { border-color: var(--lime); }
+  .theme .sw { height: 64px; display: grid; place-items: center; gap: 4px; padding: 10px; }
+  .theme .sw i { display: block; width: 70%; height: 8px; border-radius: 4px; }
+  .theme span { display: block; font-size: 12px; padding: 5px 8px; background: var(--panel-2); color: var(--ink-2); }
+  .opts { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+  .opts label { display: grid; gap: 4px; font-size: 12px; color: var(--ink-3); }
+  .opts select { width: auto; padding: 6px 10px; }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 4px 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; }
+  .seg button.on { background: var(--ink); color: #111; }
+  .hint { color: var(--ink-3); font-size: 12.5px; margin: 6px 0 0; }
+
+  .preview { background: radial-gradient(circle at 30% 20%, #1f2a10, transparent 50%), radial-gradient(circle at 80% 90%, #2d1426, transparent 45%), #0b0c0d; position: sticky; top: 0; height: 100vh; display: grid; place-items: center; border-left: 1px solid var(--line); }
+  .phone { width: 340px; height: 690px; border-radius: 48px; background: #000; padding: 12px; box-shadow: 0 0 0 2px #2a2c30, 0 40px 80px -30px rgba(198,244,50,.25); position: relative; }
+  .phone::before { content: ''; position: absolute; top: 22px; left: 50%; width: 92px; height: 26px; margin-left: -46px; background: #000; border-radius: 20px; z-index: 2; }
+  .phone iframe { width: 100%; height: 100%; border: 0; border-radius: 37px; background: #fff; }
+  .under { margin-top: 18px; display: flex; gap: 8px; justify-content: center; }
+  .size { font: 11px var(--mono); color: var(--ink-3); text-align: center; margin-top: 10px; }
+  .toast { position: fixed; bottom: 20px; left: 40%; transform: translate(-50%, 90px); opacity: 0; background: var(--lime); color: #111; padding: 10px 18px; border-radius: 999px; transition: .25s; font-weight: 700; z-index: 9; }
+  .toast.show { transform: translate(-50%, 0); opacity: 1; }
+  @media (max-width: 980px) { .app { grid-template-columns: 1fr; } .preview { position: static; height: auto; padding: 30px 0; border-left: 0; } .edit { justify-self: stretch; } .socials { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="edit">
+    <div class="top">
+      <div class="logo"><i><b></b><b></b><b></b></i>Stack</div>
+      <div class="grow"></div>
+      <button class="btn" id="dl">Download page</button>
+    </div>
+
+    <section class="sec">
+      <h3>Profile</h3>
+      <div class="profile">
+        <div class="avatar" id="avatar" role="button" tabindex="0" aria-label="Upload avatar">Add<br>photo</div>
+        <div class="stack">
+          <input type="text" id="name" placeholder="Your name" aria-label="Name">
+          <textarea id="bio" placeholder="A line or two about you" aria-label="Bio" rows="2"></textarea>
+        </div>
+      </div>
+      <input type="file" id="avatarFile" accept="image/*" class="hidden">
+    </section>
+
+    <section class="sec">
+      <h3><span>Links</span><button class="btn small" id="addLink">+ Add link</button></h3>
+      <div class="stack" id="links"></div>
+      <p class="hint">Drag ⋮⋮ to reorder. ★ highlights a link. The switch hides a link without deleting it.</p>
+    </section>
+
+    <section class="sec">
+      <h3>Social icons</h3>
+      <div class="socials" id="socials"></div>
+    </section>
+
+    <section class="sec">
+      <h3>Look</h3>
+      <div class="themes" id="themes"></div>
+      <div class="opts">
+        <label>Buttons<span class="seg" id="shape"></span></label>
+        <label>Font<select id="font"></select></label>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h3>Data</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn alt small" id="exp">Export JSON</button>
+        <button class="btn alt small" id="imp">Import JSON</button>
+        <input type="file" id="impFile" accept=".json" class="hidden">
+        <button class="btn alt small" id="reset">Start over</button>
+      </div>
+      <p class="hint">Your page settings live in this browser. Export them if you want a backup.</p>
+    </section>
+  </div>
+
+  <aside class="preview">
+    <div>
+      <div class="phone"><iframe id="frame" title="Page preview" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe></div>
+      <div class="size" id="size"></div>
+    </div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const KEY = 'ofs.linkinbio.v1';
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 9);
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2000); }
+
+const THEMES = {
+  paper: { name: 'Paper', bg: '#f4efe6', fg: '#1d1b16', btn: '#ffffff', btnFg: '#1d1b16', line: '#1d1b16', accent: '#e8552d' },
+  midnight: { name: 'Midnight', bg: '#0e1220', fg: '#e9ecf8', btn: '#1b2136', btnFg: '#e9ecf8', line: '#2c3557', accent: '#7c9cff' },
+  acid: { name: 'Acid', bg: '#111111', fg: '#f2f2ee', btn: '#c6f432', btnFg: '#111111', line: '#c6f432', accent: '#ff6fb5' },
+  sunset: { name: 'Sunset', bg: 'linear-gradient(160deg,#ff9a62 0%,#ff5f8f 55%,#7b3fe4 100%)', fg: '#ffffff', btn: 'rgba(255,255,255,.18)', btnFg: '#ffffff', line: 'rgba(255,255,255,.6)', accent: '#ffe066' },
+  forest: { name: 'Forest', bg: '#14281d', fg: '#e8f0e0', btn: '#e8f0e0', btnFg: '#14281d', line: '#e8f0e0', accent: '#f2b84b' },
+  bubblegum: { name: 'Bubblegum', bg: '#ffd6ec', fg: '#3a0d2a', btn: '#ffffff', btnFg: '#3a0d2a', line: '#3a0d2a', accent: '#ff3d9a' },
+};
+const FONTS = {
+  sans: { name: 'Clean sans', css: '"Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif' },
+  serif: { name: 'Classic serif', css: '"Iowan Old Style", "Palatino Linotype", Georgia, serif' },
+  mono: { name: 'Typewriter', css: 'ui-monospace, "Cascadia Code", Menlo, Consolas, monospace' },
+  narrow: { name: 'Condensed', css: '"Bahnschrift", "DIN Alternate", "Arial Narrow", sans-serif' },
+};
+const SHAPES = { pill: 'Pill', round: 'Rounded', square: 'Square', hard: 'Shadow' };
+const SOCIALS = [
+  ['email', 'Email', 'you@example.com', 'M'], ['website', 'Website', 'https://…', 'W'], ['github', 'GitHub', 'username', 'GH'], ['linkedin', 'LinkedIn', 'username', 'in'],
+  ['x', 'X / Twitter', 'handle', 'X'], ['instagram', 'Instagram', 'handle', 'IG'], ['youtube', 'YouTube', '@channel', 'YT'], ['tiktok', 'TikTok', 'handle', 'TT'],
+];
+const SOCIAL_URL = {
+  email: (v) => 'mailto:' + v, website: (v) => v, github: (v) => 'https://github.com/' + v, linkedin: (v) => 'https://www.linkedin.com/in/' + v,
+  x: (v) => 'https://x.com/' + v.replace(/^@/, ''), instagram: (v) => 'https://instagram.com/' + v.replace(/^@/, ''),
+  youtube: (v) => 'https://youtube.com/' + (v.startsWith('@') ? v : '@' + v), tiktok: (v) => 'https://tiktok.com/@' + v.replace(/^@/, ''),
+};
+
+function seed() {
+  return {
+    name: 'Robin Rivera', bio: 'Designer & weekend potter. Building small things that last.', avatar: '',
+    theme: 'paper', font: 'sans', shape: 'pill',
+    links: [
+      { id: uid(), title: 'My portfolio', url: 'https://example.com', on: true, star: true },
+      { id: uid(), title: 'Read my newsletter', url: 'https://example.com/newsletter', on: true, star: false },
+      { id: uid(), title: 'Book a call', url: 'https://example.com/call', on: true, star: false },
+      { id: uid(), title: 'Pottery shop (opening soon)', url: 'https://example.com/shop', on: false, star: false },
+    ],
+    socials: { email: 'robin@example.com', github: 'robin', instagram: 'robin.makes' },
+  };
+}
+function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+let state = load() || seed();
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state)); // pin seeded ids so share links stay valid
+const save = () => { localStorage.setItem(KEY, JSON.stringify(state)); paint(); };
+
+/* ---------- the exported page (also the preview) ---------- */
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Only allow link schemes that cannot run code in the visitor's browser.
+function safeUrl(u) {
+  const s = String(u || '').trim();
+  if (!s) return '';
+  if (/^(https?:|mailto:|tel:)/i.test(s)) return s;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return ''; // javascript:, data:, etc.
+  return 'https://' + s.replace(/^\/+/, '');
+}
+function buildPage(s) {
+  const t = THEMES[s.theme] || THEMES.paper;
+  const font = (FONTS[s.font] || FONTS.sans).css;
+  const radius = { pill: '999px', round: '14px', square: '2px', hard: '10px' }[s.shape] || '999px';
+  const hard = s.shape === 'hard';
+  const links = s.links.filter((l) => l.on && l.title.trim() && safeUrl(l.url));
+  const socials = SOCIALS.filter(([k]) => (s.socials[k] || '').trim()).map(([k, label, , mark]) => {
+    const href = safeUrl(SOCIAL_URL[k](s.socials[k].trim()));
+    return href ? `<a class="s" href="${esc(href)}" aria-label="${esc(label)}" title="${esc(label)}">${esc(mark)}</a>` : '';
+  }).join('');
+  const initials = (s.name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  const avatar = s.avatar ? `<img class="av" src="${esc(s.avatar)}" alt="">` : `<div class="av ph">${esc(initials)}</div>`;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(s.name || 'Links')}</title><meta name="description" content="${esc(s.bio)}">
+<style>
+*{box-sizing:border-box}html{background:${t.bg.startsWith('linear') ? '#7b3fe4' : t.bg}}
+body{margin:0;min-height:100vh;background:${t.bg};background-attachment:fixed;color:${t.fg};font:16px/1.45 ${font};display:flex;justify-content:center}
+main{width:100%;max-width:580px;padding:56px 20px 40px;text-align:center}
+.av{width:96px;height:96px;border-radius:50%;object-fit:cover;display:block;margin:0 auto 14px;border:2px solid ${t.line}}
+.ph{display:grid;place-items:center;font-weight:700;font-size:32px;background:${t.accent};color:${t.bg.startsWith('linear') ? '#fff' : t.bg}}
+h1{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}p{margin:0 auto 26px;max-width:420px;opacity:.82}
+.l{display:block;text-decoration:none;color:${t.btnFg};background:${t.btn};border:2px solid ${t.line};border-radius:${radius};padding:15px 20px;margin:0 0 12px;font-weight:600;transition:transform .15s,box-shadow .15s;${hard ? `box-shadow:4px 4px 0 ${t.line};` : ''}}
+.l:hover{transform:translateY(-2px)${hard ? `;box-shadow:6px 6px 0 ${t.line}` : ''}}
+.l.star{background:${t.accent};border-color:${t.accent};color:${t.bg.startsWith('linear') ? '#2a1250' : t.bg};animation:pop 2.4s ease-in-out infinite}
+@keyframes pop{0%,90%,100%{transform:none}95%{transform:scale(1.03)}}
+.so{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:26px 0 0}
+.s{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;border:2px solid ${t.line};color:${t.fg};text-decoration:none;font-weight:700;font-size:13px}
+.s:hover{background:${t.fg};color:${t.bg.startsWith('linear') ? '#7b3fe4' : t.bg}}
+footer{margin-top:40px;font-size:12px;opacity:.5}footer a{color:inherit}
+@media (prefers-reduced-motion:reduce){.l.star{animation:none}}
+</style></head>
+<body><main>
+${avatar}
+<h1>${esc(s.name)}</h1>
+${s.bio ? `<p>${esc(s.bio)}</p>` : ''}
+${links.map((l) => `<a class="l${l.star ? ' star' : ''}" href="${esc(safeUrl(l.url))}" rel="noopener">${esc(l.title)}</a>`).join('\n')}
+${socials ? `<nav class="so">${socials}</nav>` : ''}
+<footer>Made with a single HTML file</footer>
+</main></body></html>`;
+}
+
+/* ---------- editor ---------- */
+function drawProfile() {
+  $('#name').value = state.name; $('#bio').value = state.bio;
+  const av = $('#avatar');
+  av.classList.toggle('has', !!state.avatar);
+  av.style.backgroundImage = state.avatar ? `url("${state.avatar}")` : '';
+  av.replaceChildren(...(state.avatar ? [h('button', { class: 'rm', 'aria-label': 'Remove photo', onclick: (e) => { e.stopPropagation(); state.avatar = ''; save(); drawProfile(); } }, '×')] : ['Add', h('br'), 'photo']));
+}
+$('#name').addEventListener('input', (e) => { state.name = e.target.value; save(); });
+$('#bio').addEventListener('input', (e) => { state.bio = e.target.value; save(); });
+$('#avatar').addEventListener('click', () => $('#avatarFile').click());
+$('#avatar').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#avatarFile').click(); });
+$('#avatarFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  // Shrink to 256px JPEG so the exported page stays small and localStorage doesn't fill up.
+  const img = await createImageBitmap(file);
+  const side = Math.min(img.width, img.height);
+  const c = h('canvas', { width: 256, height: 256 });
+  c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 256, 256);
+  state.avatar = c.toDataURL('image/jpeg', 0.85); save(); drawProfile(); e.target.value = '';
+});
+
+let dragId = null;
+function drawLinks() {
+  const box = $('#links');
+  box.replaceChildren(...state.links.map((l) => {
+    const url = h('input', { type: 'url', value: l.url, placeholder: 'https://', 'aria-label': 'Link URL', class: l.url && !safeUrl(l.url) ? 'bad' : '',
+      oninput: (e) => { l.url = e.target.value; e.target.classList.toggle('bad', !!l.url && !safeUrl(l.url)); save(); } });
+    const row = h('div', { class: 'link' + (l.on ? '' : ' off'), draggable: 'true', 'data-id': l.id },
+      h('span', { class: 'grip', title: 'Drag to reorder' }, '⋮⋮'),
+      h('div', { class: 'fields' },
+        h('input', { type: 'text', class: 't', value: l.title, placeholder: 'Title', 'aria-label': 'Link title', oninput: (e) => { l.title = e.target.value; save(); } }),
+        url),
+      h('div', { class: 'ctl' },
+        h('button', { class: 'toggle' + (l.on ? ' on' : ''), role: 'switch', 'aria-checked': String(l.on), 'aria-label': 'Show link', onclick: () => { l.on = !l.on; save(); drawLinks(); } }),
+        h('span', {},
+          h('button', { class: 'icon star' + (l.star ? ' on' : ''), title: 'Highlight', 'aria-label': 'Highlight link', onclick: () => { l.star = !l.star; save(); drawLinks(); } }, '★'),
+          h('button', { class: 'icon', title: 'Delete', 'aria-label': 'Delete link', onclick: () => { state.links = state.links.filter((x) => x !== l); save(); drawLinks(); } }, '✕'))));
+    // only start dragging from the grip, so text inputs stay selectable
+    row.addEventListener('mousedown', (e) => { row.draggable = !!e.target.closest('.grip'); });
+    row.addEventListener('dragstart', (e) => { dragId = l.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); requestAnimationFrame(() => row.classList.add('dragging')); });
+    row.addEventListener('dragend', () => { row.classList.remove('dragging'); dragId = null; });
+    row.addEventListener('dragover', (e) => { if (dragId && dragId !== l.id) { e.preventDefault(); row.classList.add('over'); } });
+    row.addEventListener('dragleave', () => row.classList.remove('over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault(); row.classList.remove('over');
+      const from = state.links.findIndex((x) => x.id === dragId);
+      const [moved] = state.links.splice(from, 1);
+      state.links.splice(state.links.indexOf(l) + (from <= state.links.indexOf(l) ? 1 : 0), 0, moved);
+      save(); drawLinks();
+    });
+    return row;
+  }));
+}
+$('#addLink').addEventListener('click', () => {
+  state.links.unshift({ id: uid(), title: '', url: '', on: true, star: false }); save(); drawLinks();
+  $('#links input').focus();
+});
+
+function drawSocials() {
+  $('#socials').replaceChildren(...SOCIALS.map(([k, label, ph]) => h('label', {}, label,
+    h('input', { type: 'text', value: state.socials[k] || '', placeholder: ph, 'aria-label': label, oninput: (e) => { state.socials[k] = e.target.value; save(); } }))));
+}
+function drawLook() {
+  $('#themes').replaceChildren(...Object.entries(THEMES).map(([k, t]) => h('button', { class: 'theme' + (state.theme === k ? ' on' : ''), 'aria-label': 'Theme ' + t.name, onclick: () => { state.theme = k; save(); drawLook(); } },
+    h('div', { class: 'sw', style: `background:${t.bg}` }, h('i', { style: `background:${t.btn};border:1.5px solid ${t.line}` }), h('i', { style: `background:${t.accent}` })),
+    h('span', {}, t.name))));
+  $('#shape').replaceChildren(...Object.entries(SHAPES).map(([k, n]) => h('button', { class: state.shape === k ? 'on' : '', onclick: () => { state.shape = k; save(); drawLook(); } }, n)));
+  $('#font').replaceChildren(...Object.entries(FONTS).map(([k, f]) => h('option', { value: k, selected: state.font === k }, f.name)));
+}
+$('#font').addEventListener('change', (e) => { state.font = e.target.value; save(); });
+
+let paintT = 0;
+function paint() {
+  clearTimeout(paintT);
+  paintT = setTimeout(() => {
+    const html = buildPage(state);
+    $('#frame').srcdoc = html;
+    $('#size').textContent = `index.html · ${(new Blob([html]).size / 1024).toFixed(1)} KB · no JavaScript`;
+  }, 60);
+}
+function download(name, text, type) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('#dl').addEventListener('click', () => { download('index.html', buildPage(state), 'text/html'); toast('Saved index.html. Upload it anywhere.'); });
+$('#exp').addEventListener('click', () => download('link-page.json', JSON.stringify(state, null, 2), 'application/json'));
+$('#imp').addEventListener('click', () => $('#impFile').click());
+$('#impFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.links)) throw 0; state = { ...seed(), ...d }; save(); init(); toast('Imported'); } catch { toast('Not a Stack export'); }
+  e.target.value = '';
+});
+$('#reset').addEventListener('click', () => { if (!confirm('Replace everything with the example page?')) return; state = seed(); save(); init(); });
+
+function init() { drawProfile(); drawLinks(); drawSocials(); drawLook(); paint(); }
+init();
+</script>
+</body>
+</html>
