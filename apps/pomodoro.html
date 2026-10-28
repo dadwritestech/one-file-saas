@@ -1,0 +1,567 @@
+<!doctype html>
+<!--
+  one-file-saas · Tally
+  Replaces: a time tracker with Pomodoro focus timer (Toggl Track Starter, ~$108/yr)
+  One-click timer with description + project, Pomodoro mode (focus / short / long break, auto-logged),
+  entries grouped by day with inline edit, manual entries, "continue" an earlier task,
+  a weekly stacked chart by project, per-project totals with billable amounts, CSV report.
+  The running timer stores only its start time, so reloads and sleeping laptops never drift.
+  Data: localStorage key "ofs.pomodoro.v1". Export/Import JSON in the footer. No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tally · one-file-saas</title>
+<style>
+  :root {
+    --bg: #f4f1ec; --card: #fffdf9; --ink: #1d1b19; --ink-2: #6d675f; --ink-3: #a59e94; --line: #e6e0d6; --soft: #efeae2;
+    --tomato: #e5533d; --tomato-2: #c63f2b; --green: #2f8f5b; --focus: rgba(229, 83, 61, .25);
+    --sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --num: "Segoe UI Variable Display", "SF Pro Display", "Segoe UI", -apple-system, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --card: #1e1c1a; --ink: #f1ece4; --ink-2: #a8a095; --ink-3: #6f685f; --line: #2f2c28; --soft: #282522; --tomato: #f0644d; --tomato-2: #ff7a63; --green: #4fbf83; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.5 var(--sans); }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+  .hidden { display: none !important; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .bar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); }
+  .bar-in { max-width: 1240px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 12px 22px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 750; font-size: 16px; letter-spacing: -.01em; margin-right: 6px; }
+  .brand i { width: 26px; height: 26px; border-radius: 50%; background: var(--tomato); position: relative; }
+  .brand i::after { content: ''; position: absolute; left: 11px; top: -3px; width: 5px; height: 7px; border-radius: 3px 3px 0 0; background: var(--green); transform: rotate(18deg); }
+  .seg { display: inline-flex; background: var(--soft); border-radius: 9px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; color: var(--ink-2); font-weight: 600; font-size: 13px; }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  #desc { flex: 1; min-width: 120px; border: 0; background: none; font-size: 16px; padding: 8px 4px; outline: none; }
+  #desc::placeholder { color: var(--ink-3); }
+  .projsel { position: relative; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 0 10px 0 12px; height: 34px; }
+  .projsel .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .projsel select { border: 0; background: none; outline: none; padding-right: 2px; max-width: 240px; }
+  #clock { font: 650 22px var(--num); font-variant-numeric: tabular-nums; min-width: 96px; text-align: right; letter-spacing: -.01em; }
+  #go { width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--tomato); color: #fff; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(229, 83, 61, .35); transition: transform .12s; }
+  #go:hover { background: var(--tomato-2); } #go:active { transform: scale(.94); }
+  #go svg { width: 18px; height: 18px; }
+  body.running #go { background: var(--ink); box-shadow: none; }
+
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; align-items: start; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  .pomo { display: grid; grid-template-columns: 220px 1fr; align-items: center; gap: 28px; padding: 22px 28px; margin-bottom: 22px; }
+  .ring { position: relative; width: 210px; height: 210px; }
+  .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring .track { stroke: var(--soft); } .ring .prog { stroke: var(--tomato); transition: stroke-dashoffset .3s linear; stroke-linecap: round; }
+  .ring.brk .prog { stroke: var(--green); }
+  .ring .mid { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+  #pClock { font: 700 44px/1 var(--num); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  #pPhase { color: var(--ink-2); font-weight: 600; margin-top: 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+  .pinfo h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -.01em; }
+  .pinfo p { margin: 0 0 14px; color: var(--ink-2); }
+  .dots { display: flex; gap: 6px; margin-bottom: 16px; }
+  .dots span { width: 12px; height: 12px; border-radius: 50%; background: var(--soft); border: 1px solid var(--line); }
+  .dots span.on { background: var(--tomato); border-color: var(--tomato); }
+  .plens { display: flex; gap: 10px; flex-wrap: wrap; }
+  .plens label { display: grid; gap: 2px; font-size: 12px; color: var(--ink-2); }
+  .plens input { width: 78px; font-size: 14px; color: var(--ink); border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 8px; }
+  .btn { border: 1px solid var(--line); background: var(--card); border-radius: 9px; padding: 7px 13px; font-weight: 600; }
+  .btn:hover { background: var(--soft); }
+  .btn.pri { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .weekhd { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .weekhd h2 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  .weekhd .sp { flex: 1; }
+  .icon { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+  .icon:hover { background: var(--soft); }
+  .chart { padding: 18px 20px 10px; margin-bottom: 22px; }
+  .chart .tot { display: flex; gap: 26px; margin-bottom: 8px; }
+  .chart .tot div { font-size: 12px; color: var(--ink-2); }
+  .chart .tot b { display: block; font: 700 24px var(--num); color: var(--ink); font-variant-numeric: tabular-nums; }
+  #chart { width: 100%; height: 220px; display: block; }
+  #chart text { fill: var(--ink-3); font: 11.5px var(--sans); }
+  #chart .grid { stroke: var(--line); }
+  #chart .today { fill: var(--ink); font-weight: 700; }
+
+  .day { margin-bottom: 14px; overflow: hidden; }
+  .day-h { display: flex; justify-content: space-between; padding: 10px 18px; background: var(--soft); font-weight: 650; font-size: 13px; }
+  .day-h span:last-child { font-family: var(--mono); }
+  .entry { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 92px 64px; align-items: center; gap: 14px; padding: 9px 18px; border-top: 1px solid var(--line); }
+  .entry:hover { background: color-mix(in srgb, var(--soft) 50%, transparent); }
+  .entry .d { flex: 1; width: 0; min-width: 0; border: 0; background: none; padding: 4px 6px; margin-left: -6px; border-radius: 6px; outline: none; }
+  .entry .d:focus { background: var(--bg); }
+  .entry .d::placeholder { color: var(--ink-3); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; }
+  .entry .when { color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+  .entry .dur { font: 600 14px var(--mono); text-align: right; }
+  .entry .acts { display: flex; gap: 2px; justify-content: flex-end; opacity: .25; }
+  .entry:hover .acts, .entry:focus-within .acts { opacity: 1; }
+  .entry .acts button { border: 0; background: none; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-2); }
+  .entry .acts button:hover { background: var(--soft); color: var(--ink); }
+  .tag { font-size: 11px; font-weight: 700; color: var(--tomato); border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; margin-left: 6px; }
+  .empty { padding: 34px; text-align: center; color: var(--ink-2); }
+
+  .side .card { padding: 16px 18px; margin-bottom: 18px; }
+  .side h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); display: flex; justify-content: space-between; align-items: center; }
+  .side h3 button { border: 0; background: none; color: var(--tomato); font-weight: 700; text-transform: none; letter-spacing: 0; }
+  .prow { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 0; border-top: 1px solid var(--line); cursor: pointer; }
+  .prow:first-of-type { border-top: 0; }
+  .prow .pbar { grid-column: 1 / -1; height: 5px; background: var(--soft); border-radius: 3px; overflow: hidden; }
+  .prow .pbar i { display: block; height: 100%; border-radius: 3px; }
+  .prow small { color: var(--ink-2); font-size: 12px; }
+  .prow .h { font-family: var(--mono); font-weight: 600; text-align: right; }
+  .side .foot { display: flex; flex-wrap: wrap; gap: 6px; }
+  .side .foot .btn { font-size: 13px; padding: 6px 10px; }
+
+  dialog { border: 0; border-radius: 16px; padding: 0; width: min(440px, 94vw); background: var(--card); color: var(--ink); box-shadow: 0 30px 80px rgba(0,0,0,.3); }
+  dialog::backdrop { background: rgba(20, 15, 10, .45); }
+  dialog form { padding: 20px 22px; display: grid; gap: 12px; }
+  dialog h2 { margin: 0; font-size: 18px; }
+  dialog label { display: grid; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+  dialog input, dialog select { border: 1px solid var(--line); background: var(--bg); border-radius: 9px; padding: 8px 10px; font-size: 14.5px; color: var(--ink); }
+  dialog .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  dialog .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  dialog .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  dialog .acts .del { margin-right: auto; color: var(--tomato); border-color: transparent; background: none; }
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatches button { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; }
+  .swatches button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--card); }
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translate(-50%, 80px); opacity: 0; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; transition: .25s; z-index: 20; }
+  .toast.show { transform: translate(-50%, 0); opacity: 1; }
+  @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } .pomo { grid-template-columns: 1fr; justify-items: center; text-align: center; } .dots, .plens { justify-content: center; } }
+  @media (max-width: 640px) { .bar-in { flex-wrap: wrap; } .brand span, .seg { display: none; } .entry { grid-template-columns: 1fr auto; } .entry .when, .entry .chip { display: none; } }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand"><i></i><span>Tally</span></div>
+    <div class="seg" role="group" aria-label="Mode"><button id="mTimer" aria-pressed="true">Timer</button><button id="mPomo" aria-pressed="false">Pomodoro</button></div>
+    <input id="desc" placeholder="What are you working on?" aria-label="Description" autocomplete="off" list="descList">
+    <datalist id="descList"></datalist>
+    <div class="projsel"><span class="dot" id="projDot"></span><select id="proj" aria-label="Project"></select></div>
+    <div id="clock" class="num">0:00:00</div>
+    <button id="go" aria-label="Start timer" title="Start / stop (S)"></button>
+  </div>
+</header>
+
+<div class="wrap">
+  <main>
+    <section class="card pomo hidden" id="pomo">
+      <div class="ring" id="ring">
+        <svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="54" fill="none" stroke-width="7"/><circle class="prog" id="prog" cx="60" cy="60" r="54" fill="none" stroke-width="7" stroke-dasharray="339.3" stroke-dashoffset="0"/></svg>
+        <div class="mid"><div id="pClock" class="num">25:00</div><div id="pPhase">Focus</div></div>
+      </div>
+      <div class="pinfo">
+        <h2 id="pTitle">Ready to focus</h2>
+        <p id="pSub">Focus sessions are logged automatically. Breaks start on their own.</p>
+        <div class="dots" id="dots" aria-label="Sessions this cycle"></div>
+        <div class="plens">
+          <label>Focus (min)<input type="number" min="1" max="180" id="lenFocus"></label>
+          <label>Short break<input type="number" min="1" max="60" id="lenShort"></label>
+          <label>Long break<input type="number" min="1" max="90" id="lenLong"></label>
+          <label>Long every<input type="number" min="2" max="12" id="lenEvery"></label>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px"><button class="btn hidden" id="skip">Skip break</button></div>
+      </div>
+    </section>
+
+    <div class="weekhd">
+      <h2 id="weekLabel">This week</h2><span class="sp"></span>
+      <button class="icon" id="wPrev" aria-label="Previous week">‹</button>
+      <button class="btn" id="wNow">Today</button>
+      <button class="icon" id="wNext" aria-label="Next week">›</button>
+      <button class="btn" id="addManual">+ Add entry</button>
+    </div>
+    <section class="card chart">
+      <div class="tot"><div>Week total<b id="weekTotal" class="num">0:00</b></div><div>Billable<b id="weekMoney" class="num">€0</b></div><div>Daily avg<b id="weekAvg" class="num">0:00</b></div></div>
+      <svg id="chart" role="img" aria-label="Hours per day this week"></svg>
+    </section>
+    <div id="days"></div>
+  </main>
+
+  <aside class="side">
+    <div class="card"><h3>Projects <button id="newProj">+ New</button></h3><div id="projList"></div></div>
+    <div class="card"><h3>Reports</h3>
+      <div class="foot">
+        <button class="btn" id="csvWeek">CSV · this week</button>
+        <button class="btn" id="csvAll">CSV · all time</button>
+        <button class="btn" id="expJson">Export JSON</button>
+        <button class="btn" id="impJson">Import JSON</button>
+        <input type="file" id="impFile" accept=".json" class="hidden">
+      </div>
+    </div>
+    <p style="color:var(--ink-3);font-size:12.5px;padding:0 4px">Keys: <b>S</b> start/stop · <b>N</b> new entry. Everything stays in this browser.</p>
+  </aside>
+</div>
+
+<dialog id="eDlg">
+  <form method="dialog" id="eForm">
+    <h2 id="eTitle">Add time entry</h2>
+    <label>Description<input id="eDesc" autocomplete="off" list="descList"></label>
+    <label>Project<select id="eProj"></select></label>
+    <div class="row"><label>Date<input type="date" id="eDate" required></label><label>Start<input type="time" id="eStart" required></label><label>End<input type="time" id="eEnd" required></label></div>
+    <div class="acts"><button type="button" class="btn del" id="eDel">Delete</button><button value="cancel" class="btn" formnovalidate>Cancel</button><button value="ok" class="btn pri" id="eSave">Save</button></div>
+  </form>
+</dialog>
+<dialog id="pDlg">
+  <form method="dialog" id="pForm">
+    <h2 id="pdTitle">New project</h2>
+    <label>Name<input id="pName" required autocomplete="off"></label>
+    <div class="row2"><label>Client (optional)<input id="pClient" autocomplete="off"></label><label>Hourly rate (€, optional)<input type="number" id="pRate" min="0" step="1"></label></div>
+    <label>Color<div class="swatches" id="pColors"></div></label>
+    <div class="acts"><button type="button" class="btn del" id="pDel">Delete</button><button value="cancel" class="btn" formnovalidate>Cancel</button><button value="ok" class="btn pri" id="pSave">Save</button></div>
+  </form>
+</dialog>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const KEY = 'ofs.pomodoro.v1';
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 10);
+const SVGNS = 'http://www.w3.org/2000/svg';
+function h(tag, props = {}, ...kids) {
+  const el = ['svg', 'rect', 'line', 'text', 'g', 'title'].includes(tag) ? document.createElementNS(SVGNS, tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.setAttribute('class', v);
+    else if (k === 'style') el.style.cssText = v;
+    else if (k === 'value') el.value = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
+const COLORS = ['#e5533d', '#2f8f5b', '#3b6fd8', '#c9892b', '#8e5bd0', '#d0457f', '#1f9aa5', '#6b7280'];
+const HOUR = 36e5, DAY = 864e5;
+
+/* ---------- time helpers ---------- */
+const dayStart = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const weekStart = (t) => { const d = new Date(dayStart(t)); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }; // Monday
+const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
+const pad = (n) => String(n).padStart(2, '0');
+const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`; };
+const hm = (ms) => { const m = Math.round(Math.max(0, ms) / 6e4); return `${Math.floor(m / 60)}:${pad(m % 60)}`; };
+const ms2 = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`; };
+const clockTime = (t) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+const isoDate = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const hhmm = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const money = (n) => '€' + Math.round(n).toLocaleString();
+
+/* ---------- data ---------- */
+function seed() {
+  const projects = [
+    { id: 'p1', name: 'Acme redesign', client: 'Acme GmbH', rate: 85, color: COLORS[2] },
+    { id: 'p2', name: 'Deep work', client: '', rate: 0, color: COLORS[0] },
+    { id: 'p3', name: 'Admin', client: '', rate: 0, color: COLORS[7] },
+    { id: 'p4', name: 'Open source', client: '', rate: 0, color: COLORS[1] },
+  ];
+  const entries = [];
+  const today = dayStart(Date.now());
+  const plan = [ // [daysAgo, startHour, minutes, project, desc]
+    [1, 9, 95, 'p1', 'Wireframes for checkout'], [1, 11, 50, 'p2', 'Write the onboarding spec', true], [1, 14, 120, 'p1', 'Client review call + notes'], [1, 16.5, 30, 'p3', 'Invoices'],
+    [2, 8.5, 25, 'p2', 'Inbox zero', true], [2, 9, 140, 'p1', 'Design system tokens'], [2, 13, 75, 'p4', 'Fix flaky CI on parser'], [2, 15, 45, 'p3', 'Weekly planning'],
+    [3, 10, 180, 'p1', 'Prototype in Figma'], [3, 14, 60, 'p4', 'Review pull requests'],
+    [4, 9, 50, 'p2', 'Write the onboarding spec', true], [4, 10, 90, 'p1', 'Accessibility audit'], [4, 13.5, 40, 'p3', 'Expenses'],
+    [6, 10, 120, 'p4', 'Release v2.3'], [8, 9, 200, 'p1', 'Discovery workshop'], [9, 13, 90, 'p4', 'Docs rewrite'],
+  ];
+  for (const [ago, hr, min, project, desc, pomo] of plan) {
+    const start = dayStart(addDays(today, -ago)) + hr * HOUR;
+    entries.push({ id: uid(), desc, project, start, end: start + min * 6e4, pomo: !!pomo });
+  }
+  if (new Date().getHours() >= 10) entries.push({ id: uid(), desc: 'Morning standup', project: 'p3', start: today + 9.25 * HOUR, end: today + 9.5 * HOUR });
+  return { projects, entries, running: null, mode: 'timer', lastProject: 'p1', pomo: { focus: 25, short: 5, long: 15, every: 4, done: 0, next: 'focus' } };
+}
+function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+let state = load() || seed();
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state)); // pin seeded ids so share links stay valid
+const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+const proj = (id) => state.projects.find((p) => p.id === id);
+let viewWeek = weekStart(Date.now());
+
+/* ---------- timer + pomodoro ---------- */
+const PHASES = { focus: 'Focus', short: 'Short break', long: 'Long break' };
+const phaseLen = (k) => state.pomo[k] * 6e4;
+function start(opts = {}) {
+  if (state.running) stop();
+  const kind = opts.kind || (state.mode === 'pomo' ? state.pomo.next : 'timer');
+  state.running = { desc: opts.desc ?? $('#desc').value.trim(), project: opts.project ?? $('#proj').value, start: opts.at ?? Date.now(), kind };
+  if (opts.desc != null) $('#desc').value = opts.desc;
+  if (opts.project != null) $('#proj').value = opts.project;
+  state.lastProject = state.running.project;
+  save(); draw();
+}
+function stop(at = Date.now()) {
+  const r = state.running; if (!r) return;
+  state.running = null;
+  if (r.kind === 'timer' || r.kind === 'focus') {
+    const end = r.kind === 'focus' ? Math.min(at, r.start + phaseLen('focus')) : at;
+    if (end - r.start >= 1000) state.entries.push({ id: uid(), desc: r.desc, project: r.project, start: r.start, end, pomo: r.kind === 'focus' });
+  }
+  save(); draw();
+}
+function tick() {
+  const r = state.running, now = Date.now();
+  if (r && r.kind !== 'timer') {
+    const end = r.start + phaseLen(r.kind);
+    if (now >= end) {
+      stop(end);
+      if (r.kind === 'focus') {
+        state.pomo.done++;
+        const brk = state.pomo.done % state.pomo.every === 0 ? 'long' : 'short';
+        state.pomo.next = 'focus';
+        start({ kind: brk, at: end, desc: r.desc, project: r.project }); // breaks start on their own, from the scheduled end
+        chime(3); toast(`Focus done · ${PHASES[brk].toLowerCase()} started`);
+      } else { state.pomo.next = 'focus'; save(); draw(); chime(2); toast('Break over · ready when you are'); }
+      return tick();
+    }
+  }
+  drawClock();
+}
+let audio;
+function chime(n) {
+  try {
+    audio ||= new AudioContext();
+    for (let i = 0; i < n; i++) {
+      const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + i * .22;
+      o.frequency.value = 880; o.connect(g); g.connect(audio.destination);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.18, t + .02); g.gain.exponentialRampToValueAtTime(.001, t + .2);
+      o.start(t); o.stop(t + .21);
+    }
+  } catch { /* audio is a nicety */ }
+}
+
+/* ---------- drawing ---------- */
+const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>';
+const STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>';
+function drawClock() {
+  const r = state.running, now = Date.now();
+  document.body.classList.toggle('running', !!r);
+  if (!r) { $('#clock').textContent = '0:00:00'; document.title = 'Tally · one-file-saas'; }
+  else if (r.kind === 'timer') { $('#clock').textContent = hms(now - r.start); document.title = `${hms(now - r.start)} · ${r.desc || 'Tally'}`; }
+  else { const left = r.start + phaseLen(r.kind) - now; $('#clock').textContent = ms2(left); document.title = `${ms2(left)} ${PHASES[r.kind]} · Tally`; }
+  // pomodoro panel
+  const kind = r && r.kind !== 'timer' ? r.kind : state.pomo.next;
+  const len = phaseLen(kind), left = r && r.kind !== 'timer' ? r.start + len - now : len;
+  $('#pClock').textContent = ms2(left);
+  $('#pPhase').textContent = PHASES[kind];
+  $('#prog').style.strokeDashoffset = String(339.3 * (1 - Math.max(0, Math.min(1, left / len))));
+  $('#ring').classList.toggle('brk', kind !== 'focus');
+  // live minutes in today's list + chart only every minute boundary is enough; the running row updates every tick
+  const live = $('#liveDur'); if (live && r) live.textContent = hms(now - r.start);
+}
+function draw() {
+  const r = state.running;
+  $('#go').innerHTML = r ? STOP : PLAY;
+  $('#go').setAttribute('aria-label', r ? 'Stop timer' : 'Start timer');
+  $('#mTimer').setAttribute('aria-pressed', state.mode === 'timer'); $('#mPomo').setAttribute('aria-pressed', state.mode === 'pomo');
+  $('#pomo').classList.toggle('hidden', state.mode !== 'pomo');
+  // project select
+  const opts = [h('option', { value: '' }, 'No project'), ...state.projects.map((p) => h('option', { value: p.id }, p.client ? `${p.name} · ${p.client}` : p.name))];
+  const cur = r ? r.project : $('#proj').value || state.lastProject || '';
+  $('#proj').replaceChildren(...opts); $('#proj').value = proj(cur) ? cur : '';
+  $('#projDot').style.background = proj($('#proj').value)?.color || 'var(--ink-3)';
+  $('#descList').replaceChildren(...[...new Set(state.entries.slice(-80).map((e) => e.desc).filter(Boolean))].map((d) => h('option', { value: d })));
+  // pomodoro info
+  const P = state.pomo;
+  for (const [id, k] of [['lenFocus', 'focus'], ['lenShort', 'short'], ['lenLong', 'long'], ['lenEvery', 'every']]) if (document.activeElement !== $('#' + id)) $('#' + id).value = P[k];
+  const inCycle = P.done % P.every;
+  $('#dots').replaceChildren(...Array.from({ length: P.every }, (_, i) => h('span', { class: i < inCycle || (inCycle === 0 && P.done && r && r.kind === 'long') ? 'on' : '' })));
+  $('#pTitle').textContent = !r || r.kind === 'timer' ? (P.done ? `${P.done} focus session${P.done > 1 ? 's' : ''} done` : 'Ready to focus') : r.kind === 'focus' ? (r.desc || 'Focusing') : 'Step away from the screen';
+  $('#skip').classList.toggle('hidden', !(r && r.kind !== 'focus' && r.kind !== 'timer'));
+  drawWeek(); drawProjects(); drawClock();
+}
+function weekEntries() {
+  const a = viewWeek, b = addDays(viewWeek, 7);
+  const list = state.entries.filter((e) => e.start >= a && e.start < b);
+  return list;
+}
+function drawWeek() {
+  const ws = viewWeek, we = addDays(ws, 7), thisWeek = weekStart(Date.now());
+  const f = (t) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  $('#weekLabel').textContent = ws === thisWeek ? 'This week' : ws === addDays(thisWeek, -7) ? 'Last week' : `${f(ws)} – ${f(addDays(we, -1))}`;
+  $('#wNext').disabled = ws >= thisWeek;
+  const list = weekEntries();
+  const r = state.running;
+  const liveIn = r && r.kind !== 'short' && r.kind !== 'long' && r.start >= ws && r.start < we;
+  const total = list.reduce((s, e) => s + e.end - e.start, 0);
+  const billable = list.reduce((s, e) => s + (e.end - e.start) / HOUR * (proj(e.project)?.rate || 0), 0);
+  const daysWorked = new Set(list.map((e) => dayStart(e.start))).size;
+  $('#weekTotal').textContent = hm(total); $('#weekMoney').textContent = money(billable); $('#weekAvg').textContent = hm(daysWorked ? total / daysWorked : 0);
+  drawChart(list);
+  // day groups, newest first
+  const byDay = new Map();
+  for (const e of [...list].sort((a, b) => b.start - a.start)) { const k = dayStart(e.start); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(e); }
+  if (liveIn && !byDay.has(dayStart(r.start))) byDay.set(dayStart(r.start), []);
+  const keys = [...byDay.keys()].sort((a, b) => b - a);
+  const today = dayStart(Date.now());
+  $('#days').replaceChildren(...(keys.length ? keys.map((k) => {
+    const es = byDay.get(k);
+    const label = k === today ? 'Today' : k === addDays(today, -1) ? 'Yesterday' : new Date(k).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+    const live = liveIn && dayStart(r.start) === k ? [runningRow(r)] : [];
+    return h('section', { class: 'card day' }, h('div', { class: 'day-h' }, h('span', {}, label), h('span', {}, hms(es.reduce((s, e) => s + e.end - e.start, 0)))), live, es.map(entryRow));
+  }) : [h('div', { class: 'card empty' }, 'No time tracked this week. Press ', h('b', {}, 'S'), ' or the red button to start.')]));
+}
+function runningRow(r) {
+  const p = proj(r.project);
+  return h('div', { class: 'entry', style: 'background:color-mix(in srgb, var(--tomato) 7%, transparent)' },
+    h('span', { style: 'padding:4px 0;font-weight:600' }, r.desc || '(no description)', h('span', { class: 'tag' }, r.kind === 'focus' ? 'FOCUS' : 'RUNNING')),
+    p ? h('span', { class: 'chip', style: `color:${p.color}` }, h('i', { style: `background:${p.color}` }), p.name) : h('span'),
+    h('span', { class: 'when' }, `${clockTime(r.start)} –`), h('span', { class: 'dur', id: 'liveDur' }, hms(Date.now() - r.start)),
+    h('span', { class: 'acts' }, h('button', { 'aria-label': 'Stop', title: 'Stop', onclick: () => stop() }, '■')));
+}
+function entryRow(e) {
+  const p = proj(e.project);
+  const d = h('input', { class: 'd', value: e.desc, placeholder: '(no description)', 'aria-label': 'Entry description', 'data-desc': e.desc });
+  d.addEventListener('change', () => { e.desc = d.value.trim(); save(); });
+  d.addEventListener('keydown', (k) => { if (k.key === 'Enter') d.blur(); });
+  return h('div', { class: 'entry', 'data-id': e.id }, h('span', { style: 'display:flex;align-items:center;min-width:0' }, d, e.pomo ? h('span', { title: 'Pomodoro focus session', style: 'margin-left:6px;font-size:13px' }, '🍅') : null),
+    p ? h('span', { class: 'chip', style: `color:${p.color}` }, h('i', { style: `background:${p.color}` }), p.name) : h('span', { class: 'chip', style: 'color:var(--ink-3)' }, 'No project'),
+    h('span', { class: 'when' }, `${clockTime(e.start)} – ${clockTime(e.end)}`),
+    h('span', { class: 'dur' }, hms(e.end - e.start)),
+    h('span', { class: 'acts' },
+      h('button', { 'aria-label': 'Continue ' + (e.desc || 'entry'), title: 'Continue', onclick: () => { state.mode === 'pomo' ? start({ desc: e.desc, project: e.project }) : start({ desc: e.desc, project: e.project, kind: 'timer' }); } }, '▶'),
+      h('button', { 'aria-label': 'Edit ' + (e.desc || 'entry'), title: 'Edit', onclick: () => openEntry(e) }, '✎')));
+}
+function drawChart(list) {
+  const svg = $('#chart'); const W = svg.clientWidth || 700, H = 220, padL = 34, padB = 26, padT = 8;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(viewWeek, i));
+  const per = days.map((d) => { const m = new Map(); for (const e of list) if (dayStart(e.start) === d) m.set(e.project, (m.get(e.project) || 0) + e.end - e.start); return m; });
+  const maxH = Math.max(4, Math.ceil(Math.max(...per.map((m) => [...m.values()].reduce((a, b) => a + b, 0))) / HOUR / 2) * 2);
+  const y = (hrs) => padT + (H - padT - padB) * (1 - hrs / maxH);
+  const colW = (W - padL) / 7, barW = Math.min(46, colW * .55);
+  const kids = [];
+  for (let g = 0; g <= maxH; g += maxH > 8 ? 4 : 2) kids.push(h('line', { class: 'grid', x1: padL, x2: W, y1: y(g), y2: y(g) }), h('text', { x: padL - 8, y: y(g) + 4, 'text-anchor': 'end' }, g + 'h'));
+  const today = dayStart(Date.now());
+  days.forEach((d, i) => {
+    const x = padL + colW * i + (colW - barW) / 2; let acc = 0;
+    const order = state.projects.map((p) => p.id).concat(['']);
+    for (const pid of order) {
+      const v = per[i].get(pid); if (!v) continue;
+      const hrs = v / HOUR, top = y(acc + hrs), bot = y(acc);
+      kids.push(h('rect', { x, y: top, width: barW, height: Math.max(1, bot - top - 1.5), rx: 3, fill: proj(pid)?.color || '#9ca3af' }, h('title', {}, `${proj(pid)?.name || 'No project'} · ${hm(v)}`)));
+      acc += hrs;
+    }
+    kids.push(h('text', { x: x + barW / 2, y: H - 8, 'text-anchor': 'middle', class: d === today ? 'today' : '' }, new Date(d).toLocaleDateString(undefined, { weekday: 'short' })));
+  });
+  svg.replaceChildren(...kids);
+}
+function drawProjects() {
+  const list = weekEntries();
+  const tot = new Map(); for (const e of list) tot.set(e.project, (tot.get(e.project) || 0) + e.end - e.start);
+  const max = Math.max(1, ...tot.values());
+  $('#projList').replaceChildren(...state.projects.map((p) => {
+    const v = tot.get(p.id) || 0;
+    return h('div', { class: 'prow', role: 'button', tabindex: '0', 'aria-label': 'Edit project ' + p.name, onclick: () => openProject(p), onkeydown: (e) => { if (e.key === 'Enter') openProject(p); } },
+      h('span', { class: 'chip' }, h('i', { style: `background:${p.color}` }), p.name), h('span', { class: 'h' }, hm(v)),
+      h('small', {}, [p.client, p.rate ? `€${p.rate}/h` : ''].filter(Boolean).join(' · ') || 'Internal'), h('small', { style: 'text-align:right' }, p.rate ? money(v / HOUR * p.rate) : ''),
+      h('span', { class: 'pbar' }, h('i', { style: `width:${(v / max) * 100}%;background:${p.color}` })));
+  }));
+}
+
+/* ---------- dialogs ---------- */
+let editing = null;
+function fillProjSelect(sel, val) { sel.replaceChildren(h('option', { value: '' }, 'No project'), ...state.projects.map((p) => h('option', { value: p.id }, p.name))); sel.value = val || ''; }
+function openEntry(e) {
+  editing = e || null;
+  const base = e || (() => { const end = Date.now(); return { desc: '', project: $('#proj').value, start: end - HOUR, end }; })();
+  $('#eTitle').textContent = e ? 'Edit time entry' : 'Add time entry';
+  $('#eDesc').value = base.desc; fillProjSelect($('#eProj'), base.project);
+  $('#eDate').value = isoDate(base.start); $('#eStart').value = hhmm(base.start); $('#eEnd').value = hhmm(base.end);
+  $('#eDel').classList.toggle('hidden', !e);
+  $('#eDlg').showModal();
+}
+$('#eDlg').addEventListener('close', () => {
+  if ($('#eDlg').returnValue !== 'ok') return;
+  const [Y, M, D] = $('#eDate').value.split('-').map(Number);
+  const at = (t) => { const [hh, mm] = t.split(':').map(Number); return new Date(Y, M - 1, D, hh, mm).getTime(); };
+  let s = at($('#eStart').value), en = at($('#eEnd').value); if (en <= s) en += DAY; // crossing midnight
+  const data = { desc: $('#eDesc').value.trim(), project: $('#eProj').value, start: s, end: en };
+  if (editing) Object.assign(editing, data); else state.entries.push({ id: uid(), ...data });
+  viewWeek = weekStart(s); save(); draw(); toast(editing ? 'Entry updated' : 'Entry added');
+});
+$('#eDel').addEventListener('click', () => { state.entries = state.entries.filter((x) => x !== editing); editing = null; $('#eDlg').close(); save(); draw(); toast('Entry deleted'); });
+let pEditing = null, pColor = COLORS[0];
+function openProject(p) {
+  pEditing = p || null; pColor = p?.color || COLORS[state.projects.length % COLORS.length];
+  $('#pdTitle').textContent = p ? 'Edit project' : 'New project';
+  $('#pName').value = p?.name || ''; $('#pClient').value = p?.client || ''; $('#pRate').value = p?.rate || '';
+  $('#pDel').classList.toggle('hidden', !p);
+  drawSwatches(); $('#pDlg').showModal();
+}
+function drawSwatches() { $('#pColors').replaceChildren(...COLORS.map((c) => h('button', { type: 'button', style: `background:${c}`, 'aria-label': 'Color ' + c, 'aria-pressed': String(c === pColor), onclick: () => { pColor = c; drawSwatches(); } }))); }
+$('#pDlg').addEventListener('close', () => {
+  if ($('#pDlg').returnValue !== 'ok') return;
+  const data = { name: $('#pName').value.trim(), client: $('#pClient').value.trim(), rate: +$('#pRate').value || 0, color: pColor };
+  if (!data.name) return;
+  if (pEditing) Object.assign(pEditing, data); else { const p = { id: uid(), ...data }; state.projects.push(p); $('#proj').value = p.id; state.lastProject = p.id; }
+  save(); draw();
+});
+$('#pDel').addEventListener('click', () => {
+  const n = state.entries.filter((e) => e.project === pEditing.id).length;
+  if (!confirm(`Delete “${pEditing.name}”? ${n} entr${n === 1 ? 'y keeps' : 'ies keep'} their time without a project.`)) return;
+  state.entries.forEach((e) => { if (e.project === pEditing.id) e.project = ''; });
+  state.projects = state.projects.filter((p) => p !== pEditing); $('#pDlg').close(); save(); draw();
+});
+
+/* ---------- export ---------- */
+function download(name, text, type) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function csv(list) {
+  const q = (v) => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const rows = [['Date', 'Start', 'End', 'Duration (h)', 'Project', 'Client', 'Description', 'Amount (EUR)']];
+  for (const e of [...list].sort((a, b) => a.start - b.start)) {
+    const p = proj(e.project), hrs = (e.end - e.start) / HOUR;
+    rows.push([isoDate(e.start), hhmm(e.start), hhmm(e.end), hrs.toFixed(2), p?.name || '', p?.client || '', e.desc, p?.rate ? (hrs * p.rate).toFixed(2) : '']);
+  }
+  return rows.map((r) => r.map(q).join(',')).join('\r\n') + '\r\n';
+}
+$('#csvWeek').addEventListener('click', () => download(`tally-week-${isoDate(viewWeek)}.csv`, csv(weekEntries()), 'text/csv'));
+$('#csvAll').addEventListener('click', () => download('tally-all.csv', csv(state.entries), 'text/csv'));
+$('#expJson').addEventListener('click', () => download('tally.json', JSON.stringify(state, null, 2), 'application/json'));
+$('#impJson').addEventListener('click', () => $('#impFile').click());
+$('#impFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.entries) || !Array.isArray(d.projects)) throw 0; state = { ...seed(), ...d }; save(); draw(); toast('Imported'); } catch { toast('Not a Tally export'); }
+  e.target.value = '';
+});
+
+/* ---------- wiring ---------- */
+$('#go').addEventListener('click', () => state.running ? stop() : start());
+$('#desc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); state.running ? (state.running.desc = $('#desc').value.trim(), save(), draw()) : start(); } });
+$('#desc').addEventListener('change', () => { if (state.running) { state.running.desc = $('#desc').value.trim(); save(); draw(); } });
+$('#proj').addEventListener('change', () => { state.lastProject = $('#proj').value; if (state.running) state.running.project = $('#proj').value; save(); draw(); });
+$('#mTimer').addEventListener('click', () => { if (state.running && state.running.kind !== 'timer') stop(); state.mode = 'timer'; save(); draw(); });
+$('#mPomo').addEventListener('click', () => { if (state.running?.kind === 'timer') stop(); state.mode = 'pomo'; save(); draw(); });
+$('#skip').addEventListener('click', () => { state.running = null; state.pomo.next = 'focus'; save(); draw(); });
+for (const [id, k, lo, hi] of [['lenFocus', 'focus', 1, 180], ['lenShort', 'short', 1, 60], ['lenLong', 'long', 1, 90], ['lenEvery', 'every', 2, 12]])
+  $('#' + id).addEventListener('change', (e) => { state.pomo[k] = Math.min(hi, Math.max(lo, Math.round(+e.target.value) || state.pomo[k])); save(); draw(); });
+$('#wPrev').addEventListener('click', () => { viewWeek = addDays(viewWeek, -7); draw(); });
+$('#wNext').addEventListener('click', () => { viewWeek = addDays(viewWeek, 7); draw(); });
+$('#wNow').addEventListener('click', () => { viewWeek = weekStart(Date.now()); draw(); });
+$('#addManual').addEventListener('click', () => openEntry());
+$('#newProj').addEventListener('click', () => openProject());
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, select, textarea, dialog') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 's' || e.key === 'S') { e.preventDefault(); state.running ? stop() : start(); }
+  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openEntry(); }
+});
+window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { state = JSON.parse(e.newValue); draw(); } });
+window.addEventListener('resize', () => drawChart(weekEntries()));
+if (state.running) $('#desc').value = state.running.desc;
+draw();
+setInterval(tick, 250);
+</script>
+</body>
+</html>
