@@ -1,0 +1,410 @@
+<!doctype html>
+<!--
+  one-file-saas · Reel
+  Replaces: a Loom-like screen + camera recorder (Loom Business, ~$180/yr)
+  Record your screen with a round camera bubble, screen only, or camera only, with your mic.
+  Pause, resume, a countdown, playback at 1.5×/2×, rename, download as .webm.
+  Recordings are stored in this browser (IndexedDB), never uploaded. Nothing leaves your machine.
+  Data: IndexedDB "ofs.recorder" (videos) + localStorage key "ofs.recorder.v1" (settings).
+  Export JSON (library index) in the library header. No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reel · one-file-saas</title>
+<style>
+  :root {
+    --bg: #faf8f6; --card: #ffffff; --ink: #1d1a26; --ink-2: #625d70; --ink-3: #9d98a8; --line: #ebe6ee; --soft: #f3eff5;
+    --rec: #ff3b4e; --violet: #5b3df5; --violet-2: #ece8ff;
+    --sans: "Segoe UI Variable Display", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --num: "Bahnschrift", "DIN Alternate", "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121017; --card: #1b1822; --ink: #f1eef6; --ink-2: #aaa3b8; --ink-3: #6f6880; --line: #2a2633; --soft: #221e2b; --violet-2: #2a2350; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.5 var(--sans); }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+  :focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 22px 26px 80px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .logo { font: 700 24px var(--sans); letter-spacing: -.03em; display: flex; align-items: center; gap: 9px; }
+  .logo i { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--ink); display: grid; place-items: center; }
+  .logo i::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
+  .grow { flex: 1; }
+  .muted { color: var(--ink-2); }
+  .btn { border: 1px solid var(--line); background: var(--card); padding: 8px 14px; border-radius: 10px; font-weight: 600; font-size: 13.5px; }
+  .btn:hover { border-color: var(--ink-3); }
+  .btn.small { padding: 5px 10px; font-size: 12.5px; }
+  .btn.danger:hover { border-color: var(--rec); color: var(--rec); }
+
+  .studio { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 22px; box-shadow: 0 30px 60px -40px rgba(60, 30, 120, .35); }
+  .stage { aspect-ratio: 16 / 9; border-radius: 14px; background: repeating-linear-gradient(135deg, var(--soft) 0 14px, transparent 14px 28px), var(--bg); border: 1px solid var(--line); position: relative; overflow: hidden; display: grid; place-items: center; }
+  .stage .hint { text-align: center; color: var(--ink-2); max-width: 340px; }
+  .stage .hint b { display: block; font-size: 18px; color: var(--ink); margin-bottom: 4px; }
+  .stage video.full { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .bubble { position: absolute; width: 22%; aspect-ratio: 1; border-radius: 50%; overflow: hidden; border: 3px solid #fff; box-shadow: 0 10px 30px rgba(0,0,0,.25); background: #222; }
+  .bubble video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .bubble.s { width: 15%; } .bubble.l { width: 30%; }
+  .bubble.br { right: 4%; bottom: 6%; } .bubble.bl { left: 4%; bottom: 6%; } .bubble.tr { right: 4%; top: 6%; } .bubble.tl { left: 4%; top: 6%; }
+  .count { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(18, 16, 23, .55); color: #fff; font: 700 120px var(--num); }
+  .count span { animation: pop .9s ease-out; }
+  @keyframes pop { from { transform: scale(1.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  .side { display: grid; gap: 16px; align-content: start; }
+  .lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-3); font-weight: 700; margin-bottom: 6px; }
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .mode { border: 2px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 6px 8px; display: grid; justify-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+  .mode.on { border-color: var(--violet); color: var(--ink); background: var(--violet-2); }
+  .mode svg { width: 42px; height: 28px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+  .switch { width: 40px; height: 23px; border-radius: 999px; background: var(--line); border: 0; position: relative; padding: 0; flex: none; }
+  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .switch.on { background: var(--violet); }
+  .switch.on::after { left: 20px; }
+  .seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+  .seg button { border: 0; background: none; padding: 2px 9px; border-radius: 6px; font-size: 12.5px; color: var(--ink-2); }
+  .seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .go { width: 100%; border: 0; border-radius: 14px; background: var(--rec); color: #fff; font: 700 16px var(--sans); padding: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 10px 24px -10px var(--rec); }
+  .go:hover { filter: brightness(1.06); }
+  .go i { width: 12px; height: 12px; border-radius: 50%; background: #fff; }
+  .note { font-size: 12px; color: var(--ink-3); }
+
+  .dock { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: #16131c; color: #fff; border-radius: 999px; padding: 8px 10px 8px 18px; display: flex; align-items: center; gap: 12px; box-shadow: 0 20px 40px -10px rgba(0,0,0,.5); z-index: 10; }
+  .dock .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--rec); animation: blink 1.2s infinite; }
+  .dock.paused .dot { animation: none; background: #ffb547; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .dock .t { font: 600 18px var(--num); font-variant-numeric: tabular-nums; min-width: 58px; }
+  .dock button { border: 0; border-radius: 999px; padding: 8px 14px; background: #2b2633; color: #fff; font-weight: 600; }
+  .dock button.stop { background: var(--rec); }
+
+  .lib { margin-top: 34px; }
+  .libh { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .libh h2 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+  .libh input { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; width: 220px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; text-align: left; padding: 0; transition: transform .15s, box-shadow .15s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 16px 30px -18px rgba(60, 30, 120, .45); }
+  .thumb { aspect-ratio: 16 / 9; background: #1b1822 center/cover; position: relative; }
+  .thumb .d { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.7); color: #fff; font: 600 12px var(--num); padding: 1px 7px; border-radius: 6px; }
+  .card .meta { padding: 10px 12px 12px; }
+  .card .ti { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .sub { color: var(--ink-3); font-size: 12.5px; }
+  .empty { border: 2px dashed var(--line); border-radius: 14px; padding: 34px; text-align: center; color: var(--ink-3); }
+
+  dialog { border: 0; border-radius: 18px; padding: 0; width: min(960px, 94vw); background: var(--card); color: var(--ink); box-shadow: 0 40px 80px rgba(0,0,0,.4); }
+  dialog::backdrop { background: rgba(18, 14, 26, .6); backdrop-filter: blur(3px); }
+  .pv video { width: 100%; display: block; background: #000; max-height: 70vh; }
+  .pv .bar { display: flex; align-items: center; gap: 10px; padding: 14px 16px; flex-wrap: wrap; }
+  .pv .bar input { flex: 1; min-width: 200px; border: 1px solid transparent; background: none; border-radius: 8px; padding: 6px 8px; font-weight: 650; font-size: 16px; }
+  .pv .bar input:hover, .pv .bar input:focus { border-color: var(--line); outline: none; }
+  .toast { position: fixed; bottom: 90px; left: 50%; transform: translate(-50%, 30px); opacity: 0; background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 10px; transition: .25s; z-index: 20; pointer-events: none; }
+  .toast.show { transform: translate(-50%, 0); opacity: 1; }
+  @media (max-width: 860px) { .studio { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><i></i>Reel</div>
+    <span class="muted">Record, rewatch, download. Videos never leave this browser.</span>
+  </header>
+
+  <section class="studio">
+    <div class="stage" id="stage">
+      <div class="hint" id="hint"><b>Ready when you are</b>Pick what to record on the right. Your browser will ask which screen or window to share.</div>
+    </div>
+    <div class="side">
+      <div>
+        <div class="lbl">Record</div>
+        <div class="modes" id="modes"></div>
+      </div>
+      <div>
+        <div class="row"><span>Microphone</span><button class="switch" id="mic" role="switch" aria-label="Microphone"></button></div>
+        <div class="row" id="bubbleRow"><span>Camera bubble</span><span style="display:flex;gap:6px"><span class="seg" id="bsize"></span><select id="corner" aria-label="Bubble corner"><option value="br">↘</option><option value="bl">↙</option><option value="tr">↗</option><option value="tl">↖</option></select></span></div>
+        <div class="row"><span>Countdown</span><select id="countdown" aria-label="Countdown"><option value="0">None</option><option value="3">3 s</option><option value="5">5 s</option></select></div>
+        <div class="row"><span>Preview camera</span><button class="switch" id="preview" role="switch" aria-label="Preview camera"></button></div>
+      </div>
+      <button class="go" id="start"><i></i>Start recording</button>
+      <div class="note" id="note">Tip: press <b>Alt+Shift+R</b> to start or stop.</div>
+    </div>
+  </section>
+
+  <section class="lib">
+    <div class="libh">
+      <h2>Library</h2><span class="muted" id="libCount"></span>
+      <div class="grow"></div>
+      <input type="search" id="q" placeholder="Search titles" aria-label="Search recordings">
+      <button class="btn small" id="exp">Export JSON</button>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+</div>
+
+<div class="dock hidden" id="dock">
+  <span class="dot"></span><span class="t" id="clock">0:00</span>
+  <button id="pause">Pause</button><button id="cancel">Discard</button><button class="stop" id="stop">Stop</button>
+</div>
+
+<dialog id="player" class="pv">
+  <video id="pvVideo" controls playsinline></video>
+  <div class="bar">
+    <input id="pvTitle" aria-label="Title">
+    <span class="seg" id="speed"></span>
+    <button class="btn small" id="pvDl">Download .webm</button>
+    <button class="btn small danger" id="pvDel">Delete</button>
+    <button class="btn small" id="pvClose">Close</button>
+  </div>
+</dialog>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const KEY = 'ofs.recorder.v1';
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 9);
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400); }
+const fmt = (s) => { s = Math.round(s); const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, '0')}`; };
+const bytes = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+
+/* ---------- settings ---------- */
+const DEFAULTS = { mode: 'both', mic: true, corner: 'br', size: 'm', countdown: 3, preview: false };
+let cfg = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY) || 'null') || {}) };
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(cfg));
+const saveCfg = () => localStorage.setItem(KEY, JSON.stringify(cfg));
+
+/* ---------- IndexedDB (videos are too big for localStorage) ---------- */
+const db = new Promise((res, rej) => {
+  const r = indexedDB.open('ofs.recorder', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('clips', { keyPath: 'id' });
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+async function tx(mode, fn) {
+  const d = await db;
+  return new Promise((res, rej) => {
+    const t = d.transaction('clips', mode); const st = t.objectStore('clips'); let out;
+    Promise.resolve(fn(st)).then((r) => { out = r; });
+    t.oncomplete = () => res(out?.result ?? out); t.onerror = () => rej(t.error);
+  });
+}
+const allClips = () => tx('readonly', (s) => s.getAll());
+const putClip = (c) => tx('readwrite', (s) => s.put(c));
+const delClip = (id) => tx('readwrite', (s) => s.delete(id));
+
+/* ---------- studio controls ---------- */
+const MODES = {
+  both: ['Screen + cam', '<rect x="1" y="1" width="40" height="26" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="32" cy="19" r="6" fill="currentColor"/>'],
+  screen: ['Screen', '<rect x="1" y="1" width="40" height="26" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 9h18M8 14h12" stroke="currentColor" stroke-width="2"/>'],
+  cam: ['Camera', '<circle cx="21" cy="14" r="11" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="21" cy="11" r="4" fill="currentColor"/><path d="M13 22c2-4 14-4 16 0" fill="currentColor"/>'],
+};
+function svg(inner) { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 42 28'); s.innerHTML = inner; return s; } // static icon markup only
+function drawControls() {
+  $('#modes').replaceChildren(...Object.entries(MODES).map(([k, [name, icon]]) => h('button', { class: 'mode' + (cfg.mode === k ? ' on' : ''), 'aria-pressed': String(cfg.mode === k), onclick: () => { cfg.mode = k; saveCfg(); drawControls(); drawStage(); } }, svg(icon), name)));
+  $('#mic').classList.toggle('on', cfg.mic); $('#mic').setAttribute('aria-checked', String(cfg.mic));
+  $('#preview').classList.toggle('on', cfg.preview); $('#preview').setAttribute('aria-checked', String(cfg.preview));
+  $('#bubbleRow').classList.toggle('hidden', cfg.mode !== 'both');
+  $('#bsize').replaceChildren(...['s', 'm', 'l'].map((k) => h('button', { class: cfg.size === k ? 'on' : '', 'aria-label': 'Bubble size ' + k, onclick: () => { cfg.size = k; saveCfg(); drawControls(); drawStage(); } }, k.toUpperCase())));
+  $('#corner').value = cfg.corner; $('#countdown').value = String(cfg.countdown);
+}
+$('#mic').addEventListener('click', () => { cfg.mic = !cfg.mic; saveCfg(); drawControls(); });
+$('#preview').addEventListener('click', async () => { cfg.preview = !cfg.preview; saveCfg(); drawControls(); await drawStage(); });
+$('#corner').addEventListener('change', (e) => { cfg.corner = e.target.value; saveCfg(); drawStage(); });
+$('#countdown').addEventListener('change', (e) => { cfg.countdown = +e.target.value; saveCfg(); });
+
+let camStream = null;
+async function getCam() {
+  if (camStream && camStream.getVideoTracks()[0]?.readyState === 'live') return camStream;
+  camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+  return camStream;
+}
+function stopCam() { camStream?.getTracks().forEach((t) => t.stop()); camStream = null; }
+function vid(stream, cls) { const v = h('video', { class: cls || '', muted: true, playsinline: true, autoplay: true }); v.muted = true; v.srcObject = stream; v.play().catch(() => {}); return v; }
+async function drawStage() {
+  const st = $('#stage');
+  [...st.querySelectorAll('video, .bubble')].forEach((n) => n.remove());
+  const wantCam = cfg.preview && cfg.mode !== 'screen';
+  $('#hint').classList.toggle('hidden', wantCam);
+  if (!wantCam) { if (!rec) stopCam(); return; }
+  try {
+    const s = await getCam();
+    if (cfg.mode === 'cam') st.append(vid(s, 'full'));
+    else st.append(h('div', { class: `bubble ${cfg.size} ${cfg.corner}` }, vid(s)));
+  } catch (e) { cfg.preview = false; saveCfg(); drawControls(); $('#hint').classList.remove('hidden'); toast('Camera not available: ' + e.message); }
+}
+
+/* ---------- recording ---------- */
+let rec = null; // { mr, chunks, streams, started, elapsed, paused, cancel, compositor, thumb }
+// Workers keep ticking when the tab is in the background; rAF and main-thread timers do not.
+const ticker = new Worker(URL.createObjectURL(new Blob(['let i;onmessage=(e)=>{clearInterval(i);if(e.data)i=setInterval(()=>postMessage(0),e.data)}'], { type: 'text/javascript' })));
+
+function compositor(screen, cam, corner, size) {
+  const sv = vid(screen), cv = vid(cam);
+  const set = screen.getVideoTracks()[0].getSettings();
+  const W = set.width || 1920, H = set.height || 1080;
+  const c = h('canvas', { width: W, height: H }); const g = c.getContext('2d');
+  const frac = { s: .15, m: .22, l: .30 }[size];
+  function draw() {
+    if (sv.readyState >= 2) g.drawImage(sv, 0, 0, W, H); else { g.fillStyle = '#111'; g.fillRect(0, 0, W, H); }
+    if (cv.readyState >= 2) {
+      const d = Math.round(W * frac), m = Math.round(W * .03);
+      const x = corner.includes('r') ? W - d - m : m, y = corner.includes('b') ? H - d - m : m;
+      const vw = cv.videoWidth, vh = cv.videoHeight, side = Math.min(vw, vh);
+      g.save(); g.beginPath(); g.arc(x + d / 2, y + d / 2, d / 2, 0, Math.PI * 2); g.closePath(); g.clip();
+      g.translate(x + d, y); g.scale(-1, 1); // mirror, like a selfie
+      g.drawImage(cv, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, d, d);
+      g.restore();
+      g.lineWidth = Math.max(4, W / 320); g.strokeStyle = '#fff'; g.beginPath(); g.arc(x + d / 2, y + d / 2, d / 2, 0, Math.PI * 2); g.stroke();
+    }
+  }
+  ticker.onmessage = draw; ticker.postMessage(1000 / 30); draw();
+  return { stream: c.captureStream(30), canvas: c, stop: () => ticker.postMessage(0) };
+}
+function mixAudio(streams) {
+  const tracks = streams.flatMap((s) => s?.getAudioTracks() || []);
+  if (tracks.length <= 1) return tracks;
+  const ac = new AudioContext(); const dest = ac.createMediaStreamDestination();
+  for (const t of tracks) ac.createMediaStreamSource(new MediaStream([t])).connect(dest);
+  return dest.stream.getAudioTracks();
+}
+async function countdown(n) {
+  if (!n) return true;
+  const ov = h('div', { class: 'count' }); $('#stage').append(ov);
+  for (let i = n; i > 0; i--) { ov.replaceChildren(h('span', {}, String(i))); await new Promise((r) => setTimeout(r, 1000)); if (ov.dataset.abort) break; }
+  ov.remove(); return !ov.dataset.abort;
+}
+async function start() {
+  if (rec) return;
+  const streams = [];
+  try {
+    let screen = null, cam = null, mic = null;
+    if (cfg.mode !== 'cam') { screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true }); streams.push(screen); }
+    if (cfg.mode !== 'screen') { cam = await getCam(); }
+    if (cfg.mic) { try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); streams.push(mic); } catch { toast('No microphone. Recording without audio.'); } }
+    if (!(await countdown(cfg.countdown))) { streams.forEach((s) => s.getTracks().forEach((t) => t.stop())); return; }
+    let video, comp = null, frameSrc;
+    if (cfg.mode === 'both') { comp = compositor(screen, cam, cfg.corner, cfg.size); video = comp.stream.getVideoTracks(); frameSrc = comp.canvas; }
+    else if (cfg.mode === 'screen') { video = screen.getVideoTracks(); frameSrc = vid(screen); }
+    else { video = cam.getVideoTracks(); frameSrc = vid(cam); }
+    const out = new MediaStream([...video, ...mixAudio([screen, mic])]);
+    const type = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+    const mr = new MediaRecorder(out, { mimeType: type, videoBitsPerSecond: 4e6 });
+    rec = { mr, chunks: [], streams, comp, started: performance.now(), elapsed: 0, paused: false, thumb: '', frameSrc, mirror: cfg.mode === 'cam' };
+    mr.ondataavailable = (e) => { if (e.data.size) rec.chunks.push(e.data); };
+    mr.onstop = finish;
+    screen?.getVideoTracks()[0].addEventListener('ended', stop); // "Stop sharing" in the browser bar
+    mr.start(1000);
+    setTimeout(grabThumb, 700);
+    $('#dock').classList.remove('hidden', 'paused'); $('#start').classList.add('hidden'); $('#pause').textContent = 'Pause';
+    tickClock();
+  } catch (e) {
+    streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+    if (e.name !== 'NotAllowedError') toast('Could not start: ' + e.message); else toast('Recording cancelled');
+  }
+}
+function grabThumb() {
+  if (!rec) return;
+  const src = rec.frameSrc, w = src.videoWidth || src.width, ht = src.videoHeight || src.height;
+  if (!w) return void setTimeout(grabThumb, 300);
+  const c = h('canvas', { width: 480, height: 270 }); const g = c.getContext('2d');
+  g.fillStyle = '#1b1822'; g.fillRect(0, 0, 480, 270);
+  const s = Math.max(480 / w, 270 / ht);
+  if (rec.mirror) { g.translate(480, 0); g.scale(-1, 1); }
+  g.drawImage(src, (480 - w * s) / 2, (270 - ht * s) / 2, w * s, ht * s);
+  rec.thumb = c.toDataURL('image/jpeg', .75);
+}
+function elapsed() { return rec ? rec.elapsed + (rec.paused ? 0 : (performance.now() - rec.started) / 1000) : 0; }
+function tickClock() {
+  if (!rec) { document.title = 'Reel · one-file-saas'; return; }
+  const t = fmt(elapsed()); $('#clock').textContent = t; document.title = (rec.paused ? '❚❚ ' : '● ') + t + ' · Reel';
+  setTimeout(tickClock, 250);
+}
+function pause() {
+  if (!rec) return;
+  if (rec.paused) { rec.mr.resume(); rec.started = performance.now(); rec.paused = false; $('#pause').textContent = 'Pause'; }
+  else { rec.mr.pause(); rec.elapsed = elapsed(); rec.paused = true; $('#pause').textContent = 'Resume'; }
+  $('#dock').classList.toggle('paused', rec.paused);
+}
+function stop() { if (rec && rec.mr.state !== 'inactive') { rec.elapsed = elapsed(); rec.paused = true; rec.mr.stop(); } }
+function cancel() { if (!rec) return; rec.cancel = true; stop(); }
+async function finish() {
+  const r = rec; rec = null;
+  r.comp?.stop(); r.streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+  if (!cfg.preview || cfg.mode === 'screen') stopCam();
+  $('#dock').classList.add('hidden'); $('#start').classList.remove('hidden'); tickClock();
+  if (r.cancel) return toast('Recording discarded');
+  const blob = new Blob(r.chunks, { type: r.mr.mimeType || 'video/webm' });
+  const now = new Date();
+  const clip = { id: uid(), title: `${{ both: 'Screen + cam', screen: 'Screen', cam: 'Camera' }[cfg.mode]} · ${now.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+    created: now.toISOString(), duration: r.elapsed, size: blob.size, mode: cfg.mode, thumb: r.thumb, blob };
+  await putClip(clip);
+  await drawLib();
+  openClip(clip.id);
+}
+$('#start').addEventListener('click', start);
+$('#stop').addEventListener('click', stop);
+$('#pause').addEventListener('click', pause);
+$('#cancel').addEventListener('click', cancel);
+document.addEventListener('keydown', (e) => { if (e.altKey && e.shiftKey && e.code === 'KeyR') { e.preventDefault(); rec ? stop() : start(); } });
+
+/* ---------- library ---------- */
+let clips = [];
+async function drawLib() {
+  clips = (await allClips()).sort((a, b) => b.created.localeCompare(a.created));
+  const q = $('#q').value.trim().toLowerCase();
+  const show = clips.filter((c) => !q || c.title.toLowerCase().includes(q));
+  $('#libCount').textContent = clips.length ? `${clips.length} · ${bytes(clips.reduce((s, c) => s + c.size, 0))}` : '';
+  $('#grid').replaceChildren(...(show.length ? show.map((c) => h('button', { class: 'card', onclick: () => openClip(c.id) },
+    h('div', { class: 'thumb', style: c.thumb ? `background-image:url("${c.thumb}")` : '' }, h('span', { class: 'd' }, fmt(c.duration))),
+    h('div', { class: 'meta' }, h('div', { class: 'ti' }, c.title), h('div', { class: 'sub' }, `${new Date(c.created).toLocaleDateString()} · ${bytes(c.size)}`))))
+    : [h('div', { class: 'empty', style: 'grid-column:1/-1' }, clips.length ? 'No recordings match.' : 'Your recordings will show up here. They stay on this computer.')]));
+}
+$('#q').addEventListener('input', drawLib);
+
+let open = null, openUrl = '';
+function openClip(id) {
+  const c = clips.find((x) => x.id === id); if (!c) return;
+  open = c; URL.revokeObjectURL(openUrl); openUrl = URL.createObjectURL(c.blob);
+  const v = $('#pvVideo'); v.src = openUrl; v.playbackRate = 1;
+  // MediaRecorder WebM has no duration header; seeking far ahead makes Chrome scan for it.
+  v.onloadedmetadata = () => { if (v.duration === Infinity) { v.currentTime = 1e101; v.ontimeupdate = () => { v.ontimeupdate = null; v.currentTime = 0; }; } };
+  $('#pvTitle').value = c.title;
+  drawSpeed(); $('#player').showModal();
+}
+function drawSpeed() {
+  const v = $('#pvVideo');
+  $('#speed').replaceChildren(...[1, 1.5, 2].map((r) => h('button', { class: v.playbackRate === r ? 'on' : '', onclick: () => { v.playbackRate = r; drawSpeed(); } }, r + '×')));
+}
+$('#pvTitle').addEventListener('change', async (e) => { if (!open) return; open.title = e.target.value.trim() || open.title; await putClip(open); drawLib(); });
+const fileName = (c) => c.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) + '.webm';
+$('#pvDl').addEventListener('click', () => { const a = h('a', { href: openUrl, download: fileName(open) }); document.body.append(a); a.click(); a.remove(); });
+$('#pvDel').addEventListener('click', async () => { if (!open || !confirm(`Delete “${open.title}”? This cannot be undone.`)) return; await delClip(open.id); $('#player').close(); drawLib(); toast('Deleted'); });
+$('#pvClose').addEventListener('click', () => $('#player').close());
+$('#player').addEventListener('close', () => { $('#pvVideo').pause(); open = null; });
+$('#exp').addEventListener('click', () => {
+  const index = clips.map(({ blob, thumb, ...m }) => ({ ...m, file: fileName(m) }));
+  const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify({ settings: cfg, recordings: index }, null, 2)], { type: 'application/json' })), download: 'reel-library.json' });
+  document.body.append(a); a.click(); a.remove();
+  toast('Exported the index. Download each video from its player.');
+});
+
+if (!navigator.mediaDevices?.getDisplayMedia) { $('#note').textContent = 'This browser cannot record the screen. Camera mode still works.'; }
+drawControls(); drawStage(); drawLib();
+</script>
+</body>
+</html>
