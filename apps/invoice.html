@@ -1,0 +1,400 @@
+<!doctype html>
+<!--
+  one-file-saas · Folio
+  Replaces: a FreshBooks-like invoice generator (FreshBooks Lite, ~$228/yr)
+  The invoice on screen is the document: type straight onto the page, then Print → "Save as PDF".
+  Keeps every invoice with its status (draft, sent, paid, overdue), remembers clients and your
+  business details, and numbers invoices for you (INV-2026-001, 002, …).
+  Data: localStorage key "ofs.invoice.v1". Export/Import JSON and CSV in the top bar. No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Folio · one-file-saas</title>
+<style>
+  :root {
+    --desk: #e9e6df; --rail: #f5f3ee; --ink: #1f2430; --ink-2: #5b6170; --ink-3: #9096a3; --line: #d9d5cc; --paper: #fff;
+    --accent: #8b2f2f; --ok: #2f7a4f; --warn: #b5651d; --sel: #fff;
+    --serif: "Sitka Heading", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --desk: #16181d; --rail: #1d2027; --ink: #e8e9ee; --ink-2: #a8adb9; --ink-3: #6c7280; --line: #2d313a; --sel: #262a33; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--desk); color: var(--ink); font: 14px/1.45 var(--sans); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+  header.bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--rail); border-bottom: 1px solid var(--line); }
+  .logo { font: 600 22px var(--serif); letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px; }
+  .logo b { color: var(--accent); font-style: italic; }
+  .grow { flex: 1; }
+  .btn { border: 1px solid var(--line); background: var(--paper); color: #1f2430; padding: 7px 13px; border-radius: 8px; font-weight: 600; font-size: 13px; }
+  .btn:hover { border-color: var(--ink-3); }
+  .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+  select.btn { padding: 6px 8px; }
+  .menu { position: relative; }
+  .menu > div { position: absolute; right: 0; top: 110%; background: var(--paper); color: #1f2430; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.15); padding: 6px; min-width: 180px; display: grid; }
+  .menu > div button { border: 0; background: none; text-align: left; padding: 8px 10px; border-radius: 6px; }
+  .menu > div button:hover { background: #f1eee8; }
+  .main { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 53px); }
+  aside { background: var(--rail); border-right: 1px solid var(--line); padding: 16px; }
+  .stats { display: grid; gap: 8px; margin-bottom: 16px; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: baseline; }
+  .stat span { color: var(--ink-2); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  .stat b { font: 600 18px var(--serif); font-variant-numeric: tabular-nums; }
+  .stat.over b { color: var(--warn); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button { border: 0; background: none; padding: 5px 10px; border-radius: 999px; color: var(--ink-2); font-size: 12.5px; }
+  .tabs button.on { background: var(--ink); color: var(--rail); }
+  .list { display: grid; gap: 4px; }
+  .inv { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; text-align: left; border: 1px solid transparent; background: none; padding: 9px 10px; border-radius: 9px; }
+  .inv:hover { background: var(--sel); }
+  .inv.on { background: var(--sel); border-color: var(--line); box-shadow: 0 1px 0 var(--line); }
+  .inv .n { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .inv .a { font-variant-numeric: tabular-nums; text-align: right; }
+  .inv .c { color: var(--ink-2); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; justify-self: end; align-self: center; }
+  .pill.draft { background: #e3e1dc; color: #5b6170; }
+  .pill.sent { background: #dfe8f6; color: #2c4f86; }
+  .pill.paid { background: #dcefe3; color: var(--ok); }
+  .pill.overdue { background: #f8e3cf; color: var(--warn); }
+  .empty { color: var(--ink-3); font-size: 13px; padding: 10px; }
+
+  .stage { padding: 28px 28px 80px; overflow: auto; }
+  .paper { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; color: #1f2430; padding: 18mm 18mm 16mm; box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 18px 50px -20px rgba(0,0,0,.35); position: relative; display: flex; flex-direction: column; }
+  .paper input, .paper textarea, .paper select { border: 1px dashed transparent; background: transparent; border-radius: 4px; padding: 2px 4px; margin: -3px -5px; width: calc(100% + 10px); resize: none; overflow: hidden; }
+  .paper input:hover, .paper textarea:hover { border-color: #d6d1c6; }
+  .paper input:focus, .paper textarea:focus { border-color: var(--accent); outline: none; background: #fffaf3; }
+  .paper ::placeholder { color: #b7b2a8; }
+  .stamp { position: absolute; top: 30mm; right: 16mm; transform: rotate(-12deg); border: 3px solid var(--ok); color: var(--ok); font: 800 26px var(--sans); letter-spacing: .2em; padding: 4px 14px; border-radius: 6px; opacity: .75; pointer-events: none; }
+  .ph { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start; }
+  .from-name { font: 600 22px var(--serif); }
+  .from-addr { color: #5b6170; font-size: 13px; }
+  .logoBox { width: 120px; height: 64px; border: 1px dashed #d6d1c6; border-radius: 6px; display: grid; place-items: center; color: #9096a3; font-size: 11px; cursor: pointer; background: center/contain no-repeat; position: relative; }
+  .logoBox.has { border-color: transparent; }
+  .logoBox .rm { position: absolute; top: -8px; right: -8px; width: 20px; height: 20px; border-radius: 50%; border: 1px solid #d6d1c6; background: #fff; font-size: 11px; padding: 0; display: none; }
+  .logoBox.has:hover .rm { display: block; }
+  h1.title { font: 400 44px/1 var(--serif); letter-spacing: .02em; margin: 14mm 0 8mm; color: var(--accent); }
+  .meta { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; margin-bottom: 9mm; }
+  .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: #9096a3; font-weight: 700; margin-bottom: 4px; }
+  .to-name { font-weight: 700; font-size: 15px; }
+  .to-addr { color: #5b6170; font-size: 13px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; font-size: 13px; }
+  .kv span { color: #9096a3; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+  .kv input { text-align: right; font-variant-numeric: tabular-nums; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .items th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: #9096a3; padding: 0 6px 8px; border-bottom: 2px solid #1f2430; }
+  .items th.r, .items td.r { text-align: right; }
+  .items td { padding: 9px 6px; border-bottom: 1px solid #ebe7df; vertical-align: top; font-variant-numeric: tabular-nums; }
+  .items td input { text-align: right; }
+  .items td.amt { padding-top: 11px; white-space: nowrap; }
+  .items .x { border: 0; background: none; color: #c3bdb1; padding: 0 4px; visibility: hidden; }
+  .items tr:hover .x { visibility: visible; }
+  .items .x:hover { color: var(--accent); }
+  .addLine { margin-top: 8px; border: 1px dashed #d6d1c6; background: none; color: #5b6170; border-radius: 6px; padding: 6px 12px; font-size: 12.5px; }
+  .addLine:hover { border-color: var(--accent); color: var(--accent); }
+  .totals { margin: 7mm 0 0 auto; width: 78mm; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .totals .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 5px 0; align-items: center; }
+  .totals .row .mini { display: inline-flex; align-items: center; gap: 2px; }
+  .totals .row .mini input { width: 44px; margin: 0; text-align: right; }
+  .totals .row .mini input.lab { width: 56px; text-align: left; }
+  .totals .due { border-top: 2px solid #1f2430; margin-top: 4px; padding-top: 10px; font: 600 20px var(--serif); }
+  .totals .due b { color: var(--accent); }
+  .notes { margin-top: auto; padding-top: 12mm; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; font-size: 12.5px; color: #5b6170; }
+  .cur { font-size: 12px; color: #9096a3; }
+  .cur select { width: auto; margin: 0; padding: 0 2px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translate(-50%, 90px); opacity: 0; background: #1f2430; color: #fff; padding: 10px 18px; border-radius: 8px; transition: .25s; z-index: 20; }
+  .toast.show { transform: translate(-50%, 0); opacity: 1; }
+  @media screen and (max-width: 1100px) { .main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } .stage { padding: 12px; } .paper { width: 100%; min-height: 0; padding: 22px; } }
+
+  @page { size: A4; margin: 0; }
+  @media print {
+    body { background: #fff; }
+    header.bar, aside, .addLine, .items .x, .noprint { display: none !important; }
+    .main { display: block; }
+    .stage { padding: 0; overflow: visible; }
+    .paper { box-shadow: none; margin: 0; width: 210mm; height: 297mm; }
+    .paper input, .paper textarea, .paper select { border-color: transparent !important; background: none !important; appearance: none; }
+    .paper ::placeholder { color: transparent; }
+    .paper ::-webkit-calendar-picker-indicator { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="logo">Folio <b>invoices</b></div>
+  <div class="grow"></div>
+  <select class="btn" id="status" aria-label="Status"><option value="draft">Draft</option><option value="sent">Sent</option><option value="paid">Paid</option></select>
+  <button class="btn" id="dup">Duplicate</button>
+  <button class="btn" id="newInv">+ New invoice</button>
+  <button class="btn pri" id="print">Print / PDF</button>
+  <div class="menu">
+    <button class="btn" id="menuBtn" aria-haspopup="true">⋯</button>
+    <div class="hidden" id="menu">
+      <button id="exp">Export JSON</button>
+      <button id="imp">Import JSON</button>
+      <button id="csv">Download CSV</button>
+      <button id="del">Delete this invoice</button>
+    </div>
+  </div>
+  <input type="file" id="impFile" accept=".json" class="hidden">
+  <input type="file" id="logoFile" accept="image/*" class="hidden">
+</header>
+<div class="main">
+  <aside>
+    <div class="stats">
+      <div class="stat"><span>Outstanding</span><b id="sOut"></b></div>
+      <div class="stat over"><span>Overdue</span><b id="sOver"></b></div>
+      <div class="stat"><span id="sPaidL">Paid</span><b id="sPaid"></b></div>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <div class="list" id="list"></div>
+  </aside>
+  <div class="stage"><div class="paper" id="paper"></div></div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const KEY = 'ofs.invoice.v1';
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 9);
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k === 'value') el.value = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2000); }
+
+const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const addDays = (s, n) => { const d = new Date(s + 'T12:00'); d.setDate(d.getDate() + n); return iso(d); };
+const today = () => iso(new Date());
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'CHF', 'JPY', 'SEK', 'BRL'];
+const money = (n, cur) => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(n); } catch { return n.toFixed(2) + ' ' + cur; } };
+const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+
+function totals(inv) {
+  const sub = inv.items.reduce((s, it) => s + num(it.qty) * num(it.price), 0);
+  const disc = sub * num(inv.discount) / 100;
+  const tax = (sub - disc) * num(inv.tax) / 100;
+  const total = Math.round((sub - disc + tax) * 100) / 100;
+  return { sub, disc, tax, total };
+}
+const statusOf = (inv) => inv.status === 'sent' && inv.due < today() ? 'overdue' : inv.status;
+
+function nextNumber(list = state.invoices) {
+  const y = new Date().getFullYear();
+  const n = list.map((i) => (i.number.match(new RegExp('^INV-' + y + '-(\\d+)$')) || [])[1]).filter(Boolean).map(Number);
+  return `INV-${y}-${String((n.length ? Math.max(...n) : 0) + 1).padStart(3, '0')}`;
+}
+function blank(p) {
+  return { id: uid(), number: '', status: 'draft', issued: today(), due: addDays(today(), p.terms), currency: p.currency,
+    from: { name: p.name, address: p.address, logo: p.logo }, to: { name: '', address: '' },
+    items: [{ id: uid(), desc: '', qty: 1, price: 0 }], discount: 0, taxLabel: p.taxLabel, tax: p.tax, notes: p.notes, payment: p.payment };
+}
+function seed() {
+  const profile = { name: 'Robin Rivera Studio', address: 'Kastanienallee 12\n10435 Berlin, Germany\nhello@robinrivera.example', logo: '',
+    currency: 'EUR', tax: 19, taxLabel: 'VAT', terms: 14, notes: 'Thank you for your business.', payment: 'Bank transfer\nIBAN DE00 0000 0000 0000 0000 00\nBIC EXAMPLEXXX' };
+  const s = { profile, clients: [
+    { name: 'Northwind Coffee GmbH', address: 'Attn: Mira Okafor\nHafenstraße 3\n20459 Hamburg' },
+    { name: 'Tailspin Toys Ltd', address: '44 Canal Street\nManchester M1 3HE\nUnited Kingdom' }], invoices: [], sel: null, filter: 'all' };
+  const mk = (to, items, issuedAgo, status) => {
+    const inv = blank(profile);
+    inv.to = { ...to }; inv.items = items.map(([desc, qty, price]) => ({ id: uid(), desc, qty, price }));
+    inv.issued = addDays(today(), -issuedAgo); inv.due = addDays(inv.issued, 14); inv.status = status;
+    inv.number = nextNumber(s.invoices); s.invoices.push(inv);
+    return inv;
+  };
+  mk(s.clients[1], [['Brand workshop (half day)', 1, 900], ['Logo refinements', 6, 85]], 40, 'paid').paidOn = addDays(today(), -30);
+  mk(s.clients[0], [['Packaging illustration, 3 variants', 3, 380], ['Print-ready files', 1, 150]], 21, 'sent');
+  const d = mk(s.clients[0], [['Website hero illustration', 1, 680], ['Revisions (hours)', 2.5, 75]], 0, 'draft');
+  s.sel = d.id;
+  return s;
+}
+function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+let state = load() || seed();
+if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(state)); // pin seeded ids so share links stay valid
+const persist = () => localStorage.setItem(KEY, JSON.stringify(state));
+const cur = () => state.invoices.find((i) => i.id === state.sel) || state.invoices[0];
+
+/* ---------- rail ---------- */
+function drawRail() {
+  const y = String(new Date().getFullYear());
+  const sum = (f, pick = (i) => i.currency === state.profile.currency) => state.invoices.filter((i) => f(i) && pick(i)).reduce((s, i) => s + totals(i).total, 0);
+  const c = state.profile.currency;
+  $('#sOut').textContent = money(sum((i) => i.status === 'sent'), c);
+  $('#sOver').textContent = money(sum((i) => statusOf(i) === 'overdue'), c);
+  $('#sPaidL').textContent = 'Paid ' + y;
+  $('#sPaid').textContent = money(sum((i) => i.status === 'paid' && (i.paidOn || i.issued).startsWith(y)), c);
+  const F = { all: 'All', unpaid: 'Unpaid', paid: 'Paid', draft: 'Drafts' };
+  $('#tabs').replaceChildren(...Object.entries(F).map(([k, n]) => h('button', { class: state.filter === k ? 'on' : '', onclick: () => { state.filter = k; persist(); drawRail(); } }, n)));
+  const show = state.invoices.filter((i) => state.filter === 'all' || (state.filter === 'unpaid' ? i.status === 'sent' : i.status === state.filter))
+    .slice().sort((a, b) => b.issued.localeCompare(a.issued) || b.number.localeCompare(a.number));
+  $('#list').replaceChildren(...(show.length ? show.map((i) => {
+    const st = statusOf(i);
+    return h('button', { class: 'inv' + (i.id === state.sel ? ' on' : ''), onclick: () => select(i.id) },
+      h('span', { class: 'n' }, i.number), h('span', { class: 'a' }, money(totals(i).total, i.currency)),
+      h('span', { class: 'c' }, i.to.name || 'No client yet'), h('span', { class: 'pill ' + st }, st));
+  }) : [h('div', { class: 'empty' }, 'Nothing here.')]));
+}
+function select(id) { state.sel = id; persist(); drawAll(); }
+
+/* ---------- the page ---------- */
+function grow(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
+function field(tag, obj, key, props = {}, after) {
+  const el = h(tag, { ...props, value: obj[key] ?? '', oninput: (e) => { obj[key] = e.target.value; if (tag === 'textarea') grow(e.target); persist(); after?.(); drawTotals(); drawRail(); } });
+  if (tag === 'textarea') { el.rows = 1; requestAnimationFrame(() => grow(el)); }
+  return el;
+}
+function drawPaper() {
+  const inv = cur();
+  const P = $('#paper');
+  if (!inv) { P.replaceChildren(h('div', { class: 'empty' }, 'No invoices. Click “+ New invoice”.')); return; }
+  $('#status').value = inv.status;
+  const rememberFrom = () => { Object.assign(state.profile, { name: inv.from.name, address: inv.from.address }); };
+  const logo = h('div', { class: 'logoBox noprint-empty' + (inv.from.logo ? ' has' : ''), title: 'Add a logo', style: inv.from.logo ? `background-image:url("${inv.from.logo}")` : '', onclick: () => $('#logoFile').click() },
+    inv.from.logo ? h('button', { class: 'rm', 'aria-label': 'Remove logo', onclick: (e) => { e.stopPropagation(); inv.from.logo = state.profile.logo = ''; persist(); drawPaper(); } }, '✕') : 'Logo');
+  if (!inv.from.logo) logo.classList.add('noprint');
+
+  const clientList = h('datalist', { id: 'clients' }, state.clients.map((c) => h('option', { value: c.name })));
+  const toName = field('input', inv.to, 'name', { class: 'to-name', placeholder: 'Client name', list: 'clients', 'aria-label': 'Client name' }, () => {
+    const known = state.clients.find((c) => c.name === inv.to.name);
+    if (known && !inv.to.address) { inv.to.address = known.address; toAddr.value = known.address; grow(toAddr); persist(); }
+  });
+  const toAddr = field('textarea', inv.to, 'address', { class: 'to-addr', placeholder: 'Address, email, VAT ID', 'aria-label': 'Client address' });
+
+  const due = field('input', inv, 'due', { type: 'date', 'aria-label': 'Due date' });
+  const terms = h('select', { 'aria-label': 'Payment terms', onchange: (e) => { if (e.target.value) { inv.due = addDays(inv.issued, +e.target.value); due.value = inv.due; state.profile.terms = +e.target.value; persist(); drawRail(); } e.target.value = ''; }, class: 'noprint', style: 'width:auto;margin:0 0 0 6px' },
+    h('option', { value: '' }, 'terms…'), [0, 7, 14, 30, 45, 60].map((d) => h('option', { value: d }, d ? `Net ${d}` : 'On receipt')));
+
+  P.replaceChildren(...[
+    inv.status === 'paid' ? h('div', { class: 'stamp' }, 'PAID') : null,
+    h('div', { class: 'ph' },
+      h('div', {}, field('input', inv.from, 'name', { class: 'from-name', placeholder: 'Your business name', 'aria-label': 'Your business name' }, rememberFrom),
+        field('textarea', inv.from, 'address', { class: 'from-addr', placeholder: 'Your address, email, tax ID', 'aria-label': 'Your address' }, rememberFrom)),
+      logo),
+    h('h1', { class: 'title' }, 'Invoice'),
+    h('div', { class: 'meta' },
+      h('div', {}, h('div', { class: 'lbl' }, 'Billed to'), toName, clientList, toAddr),
+      h('div', { class: 'kv' },
+        h('span', {}, 'Number'), field('input', inv, 'number', { 'aria-label': 'Invoice number' }),
+        h('span', {}, 'Issued'), field('input', inv, 'issued', { type: 'date', 'aria-label': 'Issue date' }),
+        h('span', {}, 'Due'), h('div', { style: 'display:flex' }, due, terms),
+        h('span', { class: 'noprint' }, 'Currency'), h('div', { class: 'cur noprint' }, h('select', { 'aria-label': 'Currency', onchange: (e) => { inv.currency = state.profile.currency = e.target.value; persist(); drawAll(); } },
+          CURRENCIES.map((c) => h('option', { value: c, selected: c === inv.currency }, c)))))),
+    h('table', { class: 'items' },
+      h('thead', {}, h('tr', {}, h('th', { style: 'width:55%' }, 'Description'), h('th', { class: 'r' }, 'Qty'), h('th', { class: 'r' }, 'Unit price'), h('th', { class: 'r' }, 'Amount'), h('th', { class: 'noprint', style: 'width:20px' }))),
+      h('tbody', { id: 'rows' })),
+    h('button', { class: 'addLine', id: 'addLine', onclick: () => { inv.items.push({ id: uid(), desc: '', qty: 1, price: 0 }); persist(); drawRows(); $('#rows tr:last-child textarea').focus(); } }, '+ Add line'),
+    h('div', { class: 'totals', id: 'totals' }),
+    h('div', { class: 'notes' },
+      h('div', {}, h('div', { class: 'lbl' }, 'Payment details'), field('textarea', inv, 'payment', { placeholder: 'Bank, IBAN, PayPal…', 'aria-label': 'Payment details' }, () => { state.profile.payment = inv.payment; })),
+      h('div', {}, h('div', { class: 'lbl' }, 'Notes'), field('textarea', inv, 'notes', { placeholder: 'Thank you!', 'aria-label': 'Notes' }, () => { state.profile.notes = inv.notes; })))].filter(Boolean));
+  drawRows(); drawTotals();
+}
+function drawRows() {
+  const inv = cur();
+  $('#rows').replaceChildren(...inv.items.map((it) => {
+    const amt = h('td', { class: 'r amt' });
+    const upd = () => { amt.textContent = money(num(it.qty) * num(it.price), inv.currency); };
+    upd();
+    const desc = field('textarea', it, 'desc', { placeholder: 'What you did', 'aria-label': 'Line description', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#addLine').click(); } } });
+    return h('tr', {},
+      h('td', {}, desc),
+      h('td', { class: 'r', style: 'width:60px' }, field('input', it, 'qty', { inputmode: 'decimal', 'aria-label': 'Quantity' }, upd)),
+      h('td', { class: 'r', style: 'width:100px' }, field('input', it, 'price', { inputmode: 'decimal', 'aria-label': 'Unit price' }, upd)),
+      amt,
+      h('td', { class: 'noprint' }, h('button', { class: 'x', 'aria-label': 'Remove line', onclick: () => { inv.items = inv.items.filter((x) => x !== it); persist(); drawRows(); drawTotals(); drawRail(); } }, '✕')));
+  }));
+}
+function drawTotals() {
+  const inv = cur(); if (!inv || !$('#totals')) return;
+  const t = totals(inv), c = inv.currency;
+  const pct = (key, lab) => h('span', { class: 'mini' }, lab, field('input', inv, key, { inputmode: 'decimal', 'aria-label': key === 'tax' ? 'Tax rate' : 'Discount', onfocus: (e) => e.target.select() }, () => { if (key === 'tax') state.profile.tax = num(inv.tax); }), '%');
+  const box = $('#totals');
+  // keep focused % inputs alive while typing: only rebuild amounts
+  if (box.dataset.for === inv.id) {
+    box.querySelector('[data-k=sub]').textContent = money(t.sub, c);
+    box.querySelector('[data-k=disc]').textContent = '−' + money(t.disc, c);
+    box.querySelector('[data-k=tax]').textContent = money(t.tax, c);
+    box.querySelector('[data-k=total]').textContent = money(t.total, c);
+    return;
+  }
+  box.dataset.for = inv.id;
+  box.replaceChildren(
+    h('div', { class: 'row' }, h('span', {}, 'Subtotal'), h('span', { 'data-k': 'sub' }, money(t.sub, c))),
+    h('div', { class: 'row' + (num(inv.discount) ? '' : ' noprint') }, pct('discount', 'Discount '), h('span', { 'data-k': 'disc' }, '−' + money(t.disc, c))),
+    h('div', { class: 'row' }, h('span', { class: 'mini' }, field('input', inv, 'taxLabel', { class: 'lab', 'aria-label': 'Tax label' }, () => { state.profile.taxLabel = inv.taxLabel; }), pct('tax', '')), h('span', { 'data-k': 'tax' }, money(t.tax, c))),
+    h('div', { class: 'row due' }, h('span', {}, 'Amount due'), h('b', { 'data-k': 'total', id: 'total' }, money(t.total, c))));
+}
+function drawAll() { drawRail(); drawPaper(); }
+
+/* ---------- actions ---------- */
+function newInvoice(from) {
+  const inv = from ? { ...structuredClone(from), id: uid(), status: 'draft', issued: today(), paidOn: undefined } : blank(state.profile);
+  if (from) { inv.items.forEach((it) => { it.id = uid(); }); inv.due = addDays(today(), state.profile.terms); }
+  inv.number = nextNumber();
+  state.invoices.push(inv); state.sel = inv.id; persist(); drawAll();
+  return inv;
+}
+$('#newInv').addEventListener('click', () => { newInvoice(); $('#paper .to-name').focus(); });
+$('#dup').addEventListener('click', () => { const c = cur(); if (c) { newInvoice(c); toast('Duplicated as ' + cur().number); } });
+$('#status').addEventListener('change', (e) => {
+  const inv = cur(); if (!inv) return;
+  inv.status = e.target.value; inv.paidOn = inv.status === 'paid' ? today() : undefined;
+  if (inv.status !== 'draft' && inv.to.name.trim() && !state.clients.some((c) => c.name === inv.to.name.trim())) state.clients.push({ name: inv.to.name.trim(), address: inv.to.address });
+  persist(); drawAll(); if (inv.status === 'paid') toast('Marked paid. Nice.');
+});
+$('#print').addEventListener('click', () => {
+  const inv = cur(); if (!inv) return;
+  const old = document.title; document.title = `${inv.number} ${inv.to.name}`.trim(); // becomes the PDF file name
+  window.print(); document.title = old;
+});
+$('#logoFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const img = await createImageBitmap(f); const scale = Math.min(1, 360 / img.width, 200 / img.height);
+  const c = h('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  cur().from.logo = state.profile.logo = c.toDataURL('image/png'); persist(); drawPaper(); e.target.value = '';
+});
+$('#menuBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#menu').classList.toggle('hidden'); });
+document.addEventListener('click', () => $('#menu').classList.add('hidden'));
+function download(name, text, type) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('#exp').addEventListener('click', () => download('folio-invoices.json', JSON.stringify(state, null, 2), 'application/json'));
+$('#csv').addEventListener('click', () => {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Number', 'Client', 'Issued', 'Due', 'Status', 'Currency', 'Subtotal', 'Tax', 'Total', 'Paid on']].concat(state.invoices.map((i) => {
+    const t = totals(i); return [i.number, i.to.name, i.issued, i.due, statusOf(i), i.currency, t.sub.toFixed(2), t.tax.toFixed(2), t.total.toFixed(2), i.paidOn || ''];
+  }));
+  download('invoices.csv', rows.map((r) => r.map(q).join(',')).join('\n'), 'text/csv');
+});
+$('#imp').addEventListener('click', () => $('#impFile').click());
+$('#impFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.invoices) || !d.profile) throw 0; state = d; persist(); drawAll(); toast('Imported ' + d.invoices.length + ' invoices'); } catch { toast('Not a Folio export'); }
+  e.target.value = '';
+});
+$('#del').addEventListener('click', () => {
+  const inv = cur(); if (!inv || !confirm(`Delete ${inv.number}?`)) return;
+  state.invoices = state.invoices.filter((i) => i !== inv); state.sel = state.invoices.at(-1)?.id || null; persist(); drawAll();
+});
+window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { state = JSON.parse(e.newValue); drawAll(); } });
+drawAll();
+</script>
+</body>
+</html>
