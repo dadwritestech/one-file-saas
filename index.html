@@ -1,0 +1,191 @@
+<!doctype html>
+<!--
+  one-file-saas · gallery
+  Ten paid SaaS products, each rebuilt as one self-contained HTML file. This page is the receipt:
+  tick what you pay for today and watch the yearly total you'd stop paying.
+  Data: localStorage key "ofs.gallery.v1" (which lines are ticked). No network requests. MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>one-file-saas · cancel ten subscriptions</title>
+<style>
+  :root {
+    --bg: #ece7dc; --paper: #fffdf7; --ink: #1d1b16; --ink-2: #6b6558; --ink-3: #a59f90; --line: #d9d2c2; --red: #c8331f; --hi: #fff2a8;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --disp: "Segoe UI Variable Display", "SF Pro Display", "Segoe UI", -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15140f; --paper: #f6f1e4; --line: #d4ccb8; }
+    body > header, body > section, body > footer { --ink: #efe9da; --ink-2: #b3ab98; --ink-3: #7c7565; color: var(--ink); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid #e0a400; outline-offset: 2px; }
+
+  body > header { max-width: 1120px; margin: 0 auto; padding: 56px 28px 10px; display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: 56px; align-items: start; }
+  .kicker { font: 600 13px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--red); }
+  h1 { font: 800 clamp(40px, 6vw, 72px)/.98 var(--disp); letter-spacing: -.035em; margin: 14px 0 20px; }
+  h1 s { text-decoration-thickness: 6px; text-decoration-color: var(--red); color: var(--ink-3); }
+  .lede { font-size: 18px; color: var(--ink-2); max-width: 34em; margin: 0 0 22px; }
+  .rules { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0 0 26px; list-style: none; }
+  .rules li { font: 13px var(--mono); border: 1.5px solid var(--ink); border-radius: 999px; padding: 4px 12px; }
+  .how { color: var(--ink-2); font-size: 14px; max-width: 36em; }
+  .how code { font: 13px var(--mono); background: color-mix(in srgb, var(--ink) 8%, transparent); padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- the receipt ---------- */
+  .receipt { --ink: #1d1b16; --ink-2: #6b6558; --ink-3: #a59f90; background: var(--paper); color: var(--ink); font: 13.5px/1.5 var(--mono); padding: 30px 28px 26px; position: relative; transform: rotate(.6deg); box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 24px 50px -18px rgba(60, 45, 10, .35);
+    mask: linear-gradient(#000 0 0) top / 100% calc(100% - 9px) no-repeat, conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / 18px 9px repeat-x; }
+  .receipt .shop { text-align: center; }
+  .receipt .shop b { display: block; font-size: 19px; letter-spacing: .14em; }
+  .receipt .shop small { color: var(--ink-2); }
+  .receipt hr { border: 0; border-top: 1.5px dashed var(--ink-3); margin: 14px 0; }
+  .meta { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 12.5px; }
+  .items { list-style: none; margin: 0; padding: 0; }
+  .item label { display: grid; grid-template-columns: 18px minmax(0, auto) 1fr auto; align-items: baseline; gap: 8px; padding: 3px 0; cursor: pointer; }
+  .item input { appearance: none; width: 14px; height: 14px; border: 1.5px solid var(--ink); border-radius: 2px; margin: 0; position: relative; top: 2px; cursor: pointer; }
+  .item input:checked { background: var(--ink); }
+  .item input:checked::after { content: ""; position: absolute; left: 3.5px; top: 0; width: 4px; height: 8px; border: solid var(--paper); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .dots { border-bottom: 2px dotted var(--ink-3); transform: translateY(-4px); min-width: 12px; }
+  .item .pr { font-variant-numeric: tabular-nums; }
+  .item:has(input:not(:checked)) .nm, .item:has(input:not(:checked)) .pr { color: var(--ink-3); text-decoration: line-through; }
+  .item small { display: block; grid-column: 2 / 5; color: var(--ink-2); font-size: 11.5px; margin-top: -3px; }
+  .sum { display: flex; justify-content: space-between; color: var(--ink-2); }
+  .total { display: flex; justify-content: space-between; align-items: baseline; font-weight: 800; font-size: 15px; margin-top: 6px; }
+  .total output { font: 800 34px var(--disp); letter-spacing: -.03em; font-variant-numeric: tabular-nums; background: linear-gradient(transparent 58%, var(--hi) 58%); padding: 0 4px; }
+  .paid { color: var(--ink-2); text-align: center; margin-top: 10px; font-size: 12.5px; }
+  .stamp { position: absolute; right: 110px; top: 47%; transform: rotate(-14deg); border: 3px solid var(--red); color: var(--red); font: 800 20px var(--mono); letter-spacing: .1em; padding: 4px 10px; border-radius: 6px; opacity: .82; pointer-events: none; mix-blend-mode: multiply; }
+  .barcode { height: 44px; margin: 16px 6px 4px; background: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 4px, var(--ink) 4px 5px, transparent 5px 8px, var(--ink) 8px 11px, transparent 11px 12px, var(--ink) 12px 13px, transparent 13px 17px); }
+  .tiny { text-align: center; font-size: 11px; color: var(--ink-2); letter-spacing: .3em; }
+  .rbtns { display: flex; gap: 6px; justify-content: center; margin-top: 12px; }
+  .rbtns button { font: 12px var(--mono); border: 1.5px solid var(--ink); background: none; color: var(--ink); padding: 3px 10px; border-radius: 3px; cursor: pointer; }
+  .rbtns button:hover { background: var(--ink); color: var(--paper); }
+
+  /* ---------- the shelf ---------- */
+  section { max-width: 1120px; margin: 0 auto; padding: 40px 28px 20px; }
+  section h2 { font: 800 28px var(--disp); letter-spacing: -.02em; margin: 0 0 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .card { display: grid; grid-template-rows: auto auto 1fr auto; gap: 6px; background: var(--paper); color: #1d1b16; text-decoration: none; border-radius: 14px; padding: 18px; border: 1.5px solid transparent; transition: transform .15s, border-color .15s, box-shadow .15s; }
+  .card:hover { transform: translateY(-3px); border-color: #1d1b16; box-shadow: 0 14px 30px -16px rgba(60, 45, 10, .5); }
+  .card .ic { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; font-size: 22px; }
+  .card h3 { margin: 6px 0 0; font: 750 20px var(--disp); letter-spacing: -.01em; display: flex; justify-content: space-between; align-items: baseline; }
+  .card h3 span { font: 600 12px var(--mono); color: #6b6558; }
+  .card p { margin: 0; color: #4f4a3f; font-size: 14px; }
+  .card .ft { display: flex; justify-content: space-between; font: 12.5px var(--mono); color: #6b6558; border-top: 1.5px dashed #d4ccb8; padding-top: 10px; margin-top: 8px; }
+  .card .ft b { color: var(--red); font-weight: 700; }
+  footer { max-width: 1120px; margin: 0 auto; padding: 30px 28px 60px; color: var(--ink-2); font-size: 13px; }
+  @media (max-width: 920px) { body > header { grid-template-columns: 1fr; gap: 30px; } .receipt { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+  @media print { body { background: #fff; } body > header > div:first-child, section, footer, .rbtns { display: none; } .receipt { transform: none; box-shadow: none; margin: 0 auto; max-width: 420px; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="kicker">one-file-saas</div>
+    <h1>Ten subscriptions.<br><s>$1,294 a year.</s><br>Ten HTML files.</h1>
+    <p class="lede">Each entry rebuilds the core of a product people pay for every year, as a single file you can double-click, keep forever and read in an afternoon.</p>
+    <ul class="rules"><li>1 file</li><li>0 dependencies</li><li>0 network requests</li><li>&lt; 1,500 lines</li><li>your data stays in your browser</li></ul>
+    <p class="how">Data lives in <code>localStorage</code> and every app exports JSON. Things that normally need a server, such as a booking page or a form, put their state in the share link itself, so the other person only needs the same file. Prices are approximate yearly list prices for one user in October 2026, for comparison only. Product names belong to their owners. These are independent rebuilds, not affiliated.</p>
+  </div>
+  <aside class="receipt" aria-label="Savings receipt">
+    <div class="shop"><b>ONE-FILE-SAAS</b><small>Subscriptions you can cancel</small></div>
+    <hr>
+    <div class="meta"><span id="date"></span><span>REG 01 · 10 ITEMS</span></div>
+    <hr>
+    <ul class="items" id="items"></ul>
+    <hr>
+    <div class="sum"><span>ITEMS TICKED</span><span id="count"></span></div>
+    <div class="sum"><span>PER MONTH</span><span id="monthly"></span></div>
+    <div class="total"><span>YOU'D SAVE /YR</span><output id="total" aria-live="polite">$0</output></div>
+    <div class="paid" id="paid">You paid: $0.00. Change due: everything.</div>
+    <div class="stamp" id="stamp">CANCELLED</div>
+    <div class="barcode" aria-hidden="true"></div>
+    <div class="tiny">THANK YOU · KEEP YOUR FILES</div>
+    <div class="rbtns"><button id="all">Tick all</button><button id="none">Clear</button><button id="print">Print receipt</button></div>
+  </aside>
+</header>
+
+<section>
+  <h2>The shelf</h2>
+  <div class="grid" id="grid"></div>
+</section>
+<footer>MIT licensed. Add an eleventh: one SaaS per pull request, one file, no network, under 1,500 lines, with a Playwright smoke test. See the README.</footer>
+
+<script>
+'use strict';
+const KEY = 'ofs.gallery.v1';
+// name, file, what it is, the paid product it stands in for, yearly USD, icon, tint
+const APPS = [
+  ['Board', 'kanban', 'Kanban board with drag and drop, labels, checklists, due dates and search.', 'Trello Standard', 60, '🗂️', '#dbe7ff'],
+  ['Slots', 'scheduler', 'Booking page: set your hours, share a link, guests pick a slot and get an .ics invite.', 'Calendly Standard', 120, '📅', '#e3f5e1'],
+  ['Asks', 'forms', 'Form builder that asks one question at a time; share a link, collect responses, summaries and CSV.', 'Typeform Basic', 300, '📝', '#ffe4d6'],
+  ['Stack', 'link-in-bio', 'Link-in-bio page with themes and a live phone preview; download the page and host it anywhere.', 'Linktree Pro', 108, '🔗', '#f1e3ff'],
+  ['Folio', 'invoice', 'Invoices you type straight onto the page; taxes, discounts, clients, print to PDF.', 'FreshBooks Lite', 228, '🧾', '#fff1c7'],
+  ['Reel', 'recorder', 'Screen recorder with a round camera bubble, pause, a local library and .webm download.', 'Loom Business', 180, '🎥', '#ffdfe4'],
+  ['Daily', 'habits', 'Habit tracker with streaks, count goals, a year heatmap and weekly targets.', 'Habitify Premium', 30, '✅', '#dcf4ef'],
+  ['Pages', 'notes', 'Nested pages and a block editor with Markdown shortcuts, slash menu and Ctrl+K.', 'Notion Plus', 120, '📄', '#ececec'],
+  ['Tally', 'pomodoro', 'Time tracker with projects, rates, a weekly chart, Pomodoro mode and CSV.', 'Toggl Track Starter', 108, '⏱️', '#ffe9cf'],
+  ['Halves', 'splitter', 'Shared expenses split equally, exactly, by percent or shares, settled in few transfers.', 'Splitwise Pro', 40, '➗', '#e6e3ff'],
+];
+const $ = (s) => document.querySelector(s);
+const usd = (n, d = 0) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v; else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, ''); else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+
+let ticked;
+try { ticked = new Set(JSON.parse(localStorage.getItem(KEY))); } catch { ticked = null; }
+if (!localStorage.getItem(KEY)) ticked = new Set(APPS.map((a) => a[1]));
+const save = () => localStorage.setItem(KEY, JSON.stringify([...ticked]));
+
+$('#date').textContent = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
+$('#items').replaceChildren(...APPS.map(([name, file, , vs, price]) => h('li', { class: 'item' },
+  h('label', {},
+    h('input', { type: 'checkbox', checked: ticked.has(file), 'data-app': file, 'aria-label': `${name}, instead of ${vs}, ${usd(price)} a year`, onchange: (e) => { e.target.checked ? ticked.add(file) : ticked.delete(file); save(); update(); } }),
+    h('span', { class: 'nm' }, name.toUpperCase()), h('span', { class: 'dots' }), h('span', { class: 'pr' }, usd(price, 2)),
+    h('small', {}, 'instead of ' + vs)))));
+$('#grid').replaceChildren(...APPS.map(([name, file, what, vs, price, icon, tint]) => h('a', { class: 'card', href: `apps/${file}.html`, 'data-app': file },
+  h('span', { class: 'ic', style: `background:${tint}` }, icon),
+  h('h3', {}, name, h('span', {}, `${file}.html`)),
+  h('p', {}, what),
+  h('span', { class: 'ft' }, h('span', {}, 'instead of ' + vs), h('b', {}, usd(price) + '/yr')))));
+
+// the total counts up/down to its new value instead of jumping
+let shown = 0, raf = 0;
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function update() {
+  const target = APPS.reduce((s, a) => s + (ticked.has(a[1]) ? a[4] : 0), 0);
+  $('#count').textContent = `${ticked.size} / ${APPS.length}`;
+  $('#monthly').textContent = usd(target / 12, 2);
+  $('#total').dataset.value = target;
+  $('#stamp').style.visibility = ticked.size ? 'visible' : 'hidden';
+  $('#paid').textContent = ticked.size ? 'You paid: $0.00. Change due: everything.' : 'Tick what you pay for today.';
+  cancelAnimationFrame(raf);
+  const from = shown, t0 = performance.now(), dur = still ? 0 : 650;
+  const step = (now) => {
+    const k = dur ? Math.min(1, (now - t0) / dur) : 1, e = 1 - Math.pow(1 - k, 3);
+    shown = Math.round(from + (target - from) * e);
+    $('#total').textContent = usd(shown);
+    if (k < 1) raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+$('#all').addEventListener('click', () => { ticked = new Set(APPS.map((a) => a[1])); document.querySelectorAll('.item input').forEach((i) => (i.checked = true)); save(); update(); });
+$('#none').addEventListener('click', () => { ticked.clear(); document.querySelectorAll('.item input').forEach((i) => (i.checked = false)); save(); update(); });
+$('#print').addEventListener('click', () => print());
+update();
+</script>
+</body>
+</html>
