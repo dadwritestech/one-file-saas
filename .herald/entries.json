@@ -1,0 +1,12 @@
+{
+ "repo": "one-file-saas",
+ "link": "https://github.com/dadwritestech/one-file-saas",
+ "releases": true,
+ "entries": [
+  {
+   "glob": "apps/*.html",
+   "kind": "app",
+   "text": "New one-file SaaS: {name}. A paid web app rebuilt as a single HTML file. No server, no account, your data stays in your browser."
+  }
+ ]
+}
