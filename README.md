@@ -75,4 +75,5 @@ Choose the workflow people actually pay for over feature parity.
 
 ## Licence
 
-MIT
+[AGPL-3.0](LICENSE). Self-hosting is free; if you run a modified version as a service, share your changes.
+
