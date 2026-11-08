@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
   one-file-saas · gallery
-  Ten paid SaaS products, each rebuilt as one self-contained HTML file. This page is the receipt:
+  Eleven paid SaaS products, each rebuilt as one self-contained HTML file. This page is the receipt:
   tick what you pay for today and watch the yearly total you'd stop paying.
   Data: localStorage key "ofs.gallery.v1" (which lines are ticked). No network requests. MIT.
 -->
@@ -9,7 +9,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>one-file-saas · cancel ten subscriptions</title>
+<title>one-file-saas · cancel eleven subscriptions</title>
 <style>
   :root {
     --bg: #ece7dc; --paper: #fffdf7; --ink: #1d1b16; --ink-2: #6b6558; --ink-3: #a59f90; --line: #d9d2c2; --red: #c8331f; --hi: #fff2a8;
@@ -87,15 +87,15 @@
 <header>
   <div>
     <div class="kicker">one-file-saas</div>
-    <h1>Ten subscriptions.<br><s>$1,294 a year.</s><br>Ten HTML files.</h1>
+    <h1>Eleven subscriptions.<br><s>$1,354 a year.</s><br>Eleven HTML files.</h1>
     <p class="lede">Each entry rebuilds the core of a product people pay for every year, as a single file you can double-click, keep forever and read in an afternoon.</p>
-    <ul class="rules"><li>1 file</li><li>0 dependencies</li><li>0 network requests</li><li>&lt; 1,500 lines</li><li>your data stays in your browser</li></ul>
-    <p class="how">Data lives in <code>localStorage</code> and every app exports JSON. Things that normally need a server, such as a booking page or a form, put their state in the share link itself, so the other person only needs the same file. Prices are approximate yearly list prices for one user in October 2026, for comparison only. Product names belong to their owners. These are independent rebuilds, not affiliated.</p>
+    <ul class="rules"><li>1 file</li><li>0 dependencies</li><li>no server</li><li>&lt; 1,500 lines</li><li>your data stays in your browser</li></ul>
+    <p class="how">Data lives in <code>localStorage</code> and every app exports JSON. Things that normally need a server, such as a booking page or a form, put their state in the share link itself, so the other person only needs the same file. Duet goes further: two browsers connect directly over WebRTC and edit one document live. Prices are approximate yearly list prices for one user in October 2026, for comparison only. Product names belong to their owners. These are independent rebuilds, not affiliated.</p>
   </div>
   <aside class="receipt" aria-label="Savings receipt">
     <div class="shop"><b>ONE-FILE-SAAS</b><small>Subscriptions you can cancel</small></div>
     <hr>
-    <div class="meta"><span id="date"></span><span>REG 01 · 10 ITEMS</span></div>
+    <div class="meta"><span id="date"></span><span>REG 01 · 11 ITEMS</span></div>
     <hr>
     <ul class="items" id="items"></ul>
     <hr>
@@ -130,6 +130,7 @@ const APPS = [
   ['Daily', 'habits', 'Habit tracker with streaks, count goals, a year heatmap and weekly targets.', 'Habitify Premium', 30, '✅', '#dcf4ef'],
   ['Pages', 'notes', 'Nested pages and a block editor with Markdown shortcuts, slash menu and Ctrl+K.', 'Notion Plus', 120, '📄', '#ececec'],
   ['Tally', 'pomodoro', 'Time tracker with projects, rates, a weekly chart, Pomodoro mode and CSV.', 'Toggl Track Starter', 108, '⏱️', '#ffe9cf'],
+  ['Duet', 'duet', 'Live collaborative text editing, browser to browser over WebRTC; edits merge with a CRDT.', 'HackMD Prime', 60, '◐', '#ffe0d8'],
   ['Halves', 'splitter', 'Shared expenses split equally, exactly, by percent or shares, settled in few transfers.', 'Splitwise Pro', 40, '➗', '#e6e3ff'],
 ];
 const $ = (s) => document.querySelector(s);

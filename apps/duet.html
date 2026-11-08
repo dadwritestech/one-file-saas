@@ -1,0 +1,595 @@
+<!doctype html>
+<!--
+  one-file-saas · Duet
+  Replaces: a hosted collaborative editor (HackMD Prime, ~$60/yr)
+  Live, multi-person text editing with no server in the middle. Browsers connect directly over
+  WebRTC; the handshake travels as a link or a code you send each other however you like (chat,
+  email). Edits merge through a small sequence CRDT (RGA with Lamport clocks), so people can type
+  at the same time, or apart while offline, and every copy converges to the same text.
+  The host relays edits, so one person can invite several. Only network use: an optional public
+  STUN server (stun.l.google.com) so browsers on different networks can find each other; switch
+  it off to stay on your own network with no third party at all.
+  Data: localStorage key "ofs.duet.v1". Export/Import JSON (import merges). MIT.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duet · one-file-saas</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --panel: #ffffff; --side: #f3f1ec; --ink: #24221e; --ink-2: #6f6b63; --ink-3: #a8a49b; --line: #e4e1da;
+    --hover: #ebe8e1; --accent: #d2553a; --accent-ink: #fff; --ok: #2f8f5b; --warn: #b7791f; --code: #f1eee8;
+    --sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1917; --panel: #22211e; --side: #1f1e1b; --ink: #ebe8e1; --ink-2: #a39f96; --ink-3: #6d6a63; --line: #34322e; --hover: #2c2a27; --code: #2a2825; --accent: #e9715a; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); display: grid; grid-template-columns: 230px minmax(0, 1fr) auto; }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  nav { background: var(--side); border-right: 1px solid var(--line); height: 100vh; display: flex; flex-direction: column; font-size: 14px; }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 16px 16px 12px; font-weight: 700; letter-spacing: .01em; }
+  .brand i { width: 24px; height: 24px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-style: normal; font-size: 13px; }
+  .docs { flex: 1; overflow: auto; padding: 4px 8px; display: grid; align-content: start; gap: 1px; }
+  .docs button { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 7px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .docs button:hover { background: var(--hover); }
+  .docs button.on { background: var(--hover); color: var(--ink); font-weight: 600; }
+  .docs button .live { color: var(--ok); margin-left: 6px; font-size: 11px; }
+  .navfoot { padding: 10px 8px 14px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+  .sbtn { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 7px; color: var(--ink-2); }
+  .sbtn:hover { background: var(--hover); }
+
+  main { display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--line); position: relative; }
+  #title { flex: 1; min-width: 140px; border: 0; background: none; font-size: 19px; font-weight: 650; padding: 4px 6px; border-radius: 6px; }
+  #title:hover, #title:focus { background: var(--hover); outline: none; }
+  .pill { font-size: 12.5px; padding: 3px 10px; border-radius: 99px; background: var(--hover); color: var(--ink-2); white-space: nowrap; }
+  .pill.live { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .pill.wait { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .btn { border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; border-radius: 8px; white-space: nowrap; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.small { padding: 3px 9px; font-size: 13px; }
+  .menu { position: absolute; right: 18px; top: 48px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 34px rgba(0,0,0,.16); padding: 5px; display: grid; min-width: 190px; z-index: 9; }
+  .menu button { border: 0; background: none; text-align: left; padding: 7px 10px; border-radius: 6px; font-size: 14px; }
+  .menu button:hover { background: var(--hover); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+  .chips { display: flex; gap: 4px; }
+  .chip { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; transition: box-shadow .2s; }
+  .chip.typing { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, var(--accent)); }
+
+  #ed { flex: 1; width: 100%; resize: none; border: 0; background: var(--bg); padding: 28px max(28px, calc((100% - 760px) / 2)); font: 16px/1.7 var(--sans); outline: none; tab-size: 4; }
+  #ed.mono { font: 14.5px/1.65 var(--mono); }
+  footer { display: flex; gap: 14px; padding: 6px 18px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+  footer span:last-child { margin-left: auto; }
+
+  aside { width: 360px; height: 100vh; overflow: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 16px 18px 30px; font-size: 14px; }
+  aside h2 { font-size: 16px; margin: 0 0 4px; display: flex; align-items: center; justify-content: space-between; }
+  aside h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 20px 0 8px; }
+  aside p { margin: 6px 0; color: var(--ink-2); }
+  aside .x { border: 0; background: none; font-size: 18px; color: var(--ink-3); padding: 0 4px; }
+  label.row { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); font-size: 13px; margin: 8px 0; }
+  label.row input[type=checkbox] { margin-top: 3px; }
+  .field { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 9px; }
+  textarea.code { width: 100%; height: 76px; resize: vertical; border: 1px solid var(--line); background: var(--code); border-radius: 8px; padding: 7px 9px; font: 11.5px/1.4 var(--mono); word-break: break-all; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; display: grid; gap: 8px; }
+  .card .who { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .card .who small { margin-left: auto; font-weight: 500; color: var(--ink-3); }
+  .card .who small.ok { color: var(--ok); }
+  .card .who small.bad { color: var(--accent); }
+  .step { font-size: 13px; color: var(--ink-2); }
+  .step b { color: var(--ink); }
+  .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .note { font-size: 12.5px; color: var(--ink-3); }
+  .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 9px; font-size: 14px; z-index: 20; }
+  @media (max-width: 900px) { body { grid-template-columns: minmax(0, 1fr); } nav { display: none; } aside { position: fixed; inset: 0 0 0 auto; max-width: 100vw; z-index: 10; } }
+</style>
+</head>
+<body>
+<nav aria-label="Documents">
+  <div class="brand"><i>◐</i> Duet</div>
+  <div class="docs" id="docs"></div>
+  <div class="navfoot">
+    <button class="sbtn" id="newDoc">＋ New document</button>
+    <button class="sbtn" id="joinBtn">↘ Join with a code</button>
+  </div>
+</nav>
+<main>
+  <header>
+    <input id="title" aria-label="Document title" spellcheck="false" autocomplete="off">
+    <div class="chips" id="chips" aria-live="polite"></div>
+    <span class="pill" id="status">Just you</span>
+    <button class="btn primary" id="shareBtn">Share live</button>
+    <button class="btn" id="moreBtn" aria-label="More" aria-haspopup="true">⋯</button>
+    <div class="menu hidden" id="menu" role="menu">
+      <button id="monoBtn" role="menuitem">Monospace font</button>
+      <button id="txtBtn" role="menuitem">Download .txt</button>
+      <hr>
+      <button id="expJson" role="menuitem">Export JSON</button>
+      <button id="impJson" role="menuitem">Import JSON (merges)</button>
+      <hr>
+      <button id="delDoc" role="menuitem">Delete document</button>
+    </div>
+  </header>
+  <textarea id="ed" spellcheck="true" aria-label="Document text" placeholder="Start typing…"></textarea>
+  <footer><span id="words"></span><span id="chars"></span><span id="saved">Saved in this browser</span></footer>
+</main>
+<aside id="live" class="hidden" aria-label="Live session">
+  <h2>Live session <button class="x" id="closeLive" aria-label="Close">×</button></h2>
+  <p>Edit together with no server in between. Send the invite however you like, then paste the reply you get back.</p>
+  <h3>You</h3>
+  <input class="field" id="myName" aria-label="Your name" maxlength="24">
+  <label class="row"><input type="checkbox" id="stun"> <span>Connect across networks via a public STUN server (stun.l.google.com). It only helps browsers find each other; your text never goes through it. Turn it off to stay on your own network.</span></label>
+  <h3>People</h3>
+  <div id="peers"></div>
+  <div class="acts"><button class="btn primary" id="inviteBtn">＋ Invite someone</button><button class="btn" id="leaveBtn">End session</button></div>
+  <h3>Got an invite?</h3>
+  <textarea class="code" id="joinCode" placeholder="Paste an invite link or code"></textarea>
+  <div class="acts"><button class="btn" id="joinGo">Join</button></div>
+  <p class="note" id="fileNote"></p>
+</aside>
+<input type="file" id="file" accept="application/json" class="hidden">
+<script>
+'use strict';
+const KEY = 'ofs.duet.v1';
+const STUN = 'stun:stun.l.google.com:19302';
+const COLORS = ['#d2553a', '#2f7fd0', '#2f8f5b', '#8a4fd0', '#c2861a', '#c0457f', '#1f9aa6'];
+const $ = (s) => document.querySelector(s);
+const uid = (n = 8) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) el.append(c.nodeType ? c : String(c));
+  return el;
+}
+let toastT;
+function toast(msg) {
+  document.querySelector('.toast')?.remove();
+  const t = h('div', { class: 'toast', role: 'status' }, msg);
+  document.body.append(t);
+  clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2400);
+}
+
+// ───────────────────────── The CRDT ─────────────────────────
+// Every character gets a unique id (counter, site) and remembers the id of the character it was
+// typed after. Concurrent inserts after the same character are ordered by id, highest first, so
+// every copy builds the same sequence whatever order the edits arrive in. Deleted characters stay
+// as tombstones so later edits can still refer to them. Counters are Lamport clocks: each new
+// character gets a counter higher than any it has seen, which keeps a character's descendants
+// ahead of its lower-id siblings.
+const keyOf = (c, s) => c + '@' + s;
+const cmp = (a, b) => (a.c - b.c) || (a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
+class Doc {
+  constructor(data, site) {
+    this.id = data.id; this.site = site; this.clock = 0;
+    this.title = data.title || { v: 'Untitled', c: 0, s: '' };
+    this.seq = []; this.map = new Map(); this.pending = [];
+    for (const [c, s, pc, ps, ch, del] of data.chars || []) this.apply({ k: 'i', c, s, pc, ps, ch, del: !!del });
+  }
+  integrate(o) {
+    const key = keyOf(o.c, o.s);
+    if (this.map.has(key)) return false;
+    let i = 0;
+    if (o.pc) {
+      const parent = this.map.get(keyOf(o.pc, o.ps));
+      if (!parent) return null; // its parent hasn't arrived yet
+      i = this.seq.indexOf(parent) + 1;
+    }
+    while (i < this.seq.length && cmp(this.seq[i], o) > 0) i++;
+    const el = { c: o.c, s: o.s, pc: o.pc || 0, ps: o.ps || '', ch: o.ch, del: !!o.del };
+    this.seq.splice(i, 0, el); this.map.set(key, el);
+    this.clock = Math.max(this.clock, o.c);
+    return true;
+  }
+  // true = changed, false = already had it, null = can't apply yet
+  applyOne(o) {
+    if (o.k === 'i') return this.integrate(o);
+    if (o.k === 'd') {
+      const el = this.map.get(keyOf(o.c, o.s));
+      if (!el) return null;
+      if (el.del) return false;
+      el.del = true; return true;
+    }
+    if (o.k === 't') {
+      this.clock = Math.max(this.clock, o.c);
+      if (cmp(o, this.title) <= 0) return false;
+      this.title = { v: String(o.v).slice(0, 120), c: o.c, s: o.s }; return true;
+    }
+    return false;
+  }
+  // applies ops (queueing any that arrive before what they depend on); returns the ops that were new
+  apply(...ops) {
+    const fresh = [];
+    for (const o of ops) { const r = this.applyOne(o); if (r) fresh.push(o); else if (r === null) this.pending.push(o); }
+    for (let progress = fresh.length > 0; progress && this.pending.length;) {
+      progress = false;
+      const wait = this.pending; this.pending = [];
+      for (const o of wait) { const r = this.applyOne(o); if (r) { fresh.push(o); progress = true; } else if (r === null) this.pending.push(o); }
+    }
+    return fresh;
+  }
+  visible() { return this.seq.filter((e) => !e.del); }
+  text() { let t = ''; for (const e of this.seq) if (!e.del) t += e.ch; return t; }
+  // turn a plain textarea edit into CRDT ops by diffing against the text we last showed
+  edit(before, after) {
+    let p = 0;
+    const max = Math.min(before.length, after.length);
+    while (p < max && before[p] === after[p]) p++;
+    let s = 0;
+    while (s < max - p && before[before.length - 1 - s] === after[after.length - 1 - s]) s++;
+    const vis = this.visible(), ops = [];
+    for (let i = p; i < before.length - s; i++) { vis[i].del = true; ops.push({ k: 'd', c: vis[i].c, s: vis[i].s }); }
+    let parent = p > 0 ? vis[p - 1] : null;
+    for (const ch of after.slice(p, after.length - s)) {
+      const o = { k: 'i', c: ++this.clock, s: this.site, pc: parent ? parent.c : 0, ps: parent ? parent.s : '', ch };
+      this.integrate(o); ops.push(o); parent = this.map.get(keyOf(o.c, o.s));
+    }
+    return ops;
+  }
+  setTitle(v) { const o = { k: 't', v, c: ++this.clock, s: this.site }; this.applyOne(o); return o; }
+  // everything needed to rebuild this document elsewhere, as ops in causal order
+  allOps() {
+    const ops = this.seq.map((e) => ({ k: 'i', c: e.c, s: e.s, pc: e.pc, ps: e.ps, ch: e.ch }));
+    for (const e of this.seq) if (e.del) ops.push({ k: 'd', c: e.c, s: e.s });
+    if (this.title.c) ops.push({ k: 't', v: this.title.v, c: this.title.c, s: this.title.s });
+    return ops;
+  }
+  // cursor anchoring: the character just before a caret, and back again after remote edits
+  anchorAt(index) { return index > 0 ? this.visible()[index - 1] || null : null; }
+  indexOf(anchor) {
+    if (!anchor) return 0;
+    let n = 0;
+    for (const e of this.seq) { if (!e.del) n++; if (e === anchor) return n; }
+    return 0;
+  }
+  toJSON() {
+    return { id: this.id, title: this.title, chars: this.seq.map((e) => [e.c, e.s, e.pc, e.ps, e.ch, e.del ? 1 : 0]) };
+  }
+}
+
+// ───────────────────────── State ─────────────────────────
+const WELCOME = `Welcome to Duet.
+
+Write together in real time, straight from one browser to another. There is no server in the middle and no account.
+
+How to share:
+1. Click "Share live", then "Invite someone".
+2. Send them the invite link (or the code) any way you like.
+3. They open it and send you back a reply code. Paste it in and you're connected.
+
+Both of you can type anywhere at the same time. Edits merge character by character, and every copy ends up with the same text. If you edit apart, the copies merge the next time you connect, or when you import someone's exported JSON.
+
+The host relays edits, so you can invite several people. Everything stays in this browser.`;
+function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+let raw = load();
+if (!raw || !raw.docs) raw = { site: uid(), name: '', stun: true, mono: false, cur: null, docs: [] };
+const site = raw.site;
+const settings = { name: raw.name || 'Guest ' + site.slice(0, 3).toUpperCase(), stun: raw.stun !== false, mono: !!raw.mono };
+const docs = new Map(raw.docs.map((d) => [d.id, new Doc(d, site)]));
+function newDoc(title, text, id = uid(10)) {
+  const d = new Doc({ id }, site);
+  if (title) d.setTitle(title);
+  if (text) d.edit('', text);
+  docs.set(d.id, d); return d;
+}
+if (!docs.size) newDoc('Welcome to Duet', WELCOME);
+let doc = docs.get(raw.cur) || docs.values().next().value;
+let saveT;
+function save() {
+  clearTimeout(saveT);
+  saveT = setTimeout(saveNow, 250);
+}
+function saveNow() {
+  clearTimeout(saveT);
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ site, name: settings.name, stun: settings.stun, mono: settings.mono, cur: doc.id, docs: [...docs.values()] }));
+    $('#saved').textContent = 'Saved in this browser';
+  } catch { $('#saved').textContent = 'Could not save (storage full?)'; }
+}
+addEventListener('beforeunload', saveNow);
+
+// ───────────────────────── Editor ─────────────────────────
+const ed = $('#ed');
+let shown = '', composing = false, stale = false;
+function render() {
+  if (composing) { stale = true; return; } // never rewrite the textarea under an IME
+  const t = doc.text();
+  if (t !== ed.value) {
+    const focused = document.activeElement === ed;
+    const a = doc.anchorAt(ed.selectionStart), b = doc.anchorAt(ed.selectionEnd);
+    // anchors are taken from the doc *before* this render, so look them up in the old text
+    ed.value = t;
+    if (focused) ed.setSelectionRange(doc.indexOf(a), doc.indexOf(b));
+  }
+  shown = t;
+  counts();
+}
+function counts() {
+  const words = (shown.match(/\S+/g) || []).length;
+  $('#words').textContent = `${words} word${words === 1 ? '' : 's'}`;
+  $('#chars').textContent = `${shown.length} characters`;
+}
+ed.addEventListener('compositionstart', () => { composing = true; });
+ed.addEventListener('compositionend', () => { composing = false; onInput(); if (stale) { stale = false; render(); } });
+ed.addEventListener('input', () => { if (!composing) onInput(); });
+function onInput() {
+  const now = ed.value;
+  if (now === shown) return;
+  const ops = doc.edit(shown, now);
+  shown = now; counts();
+  send(doc.id, ops); save(); drawDocs();
+}
+// remote edits have to be anchored before they change the doc, so wrap applying them
+function applyRemote(d, ops) {
+  if (d !== doc || composing) { const fresh = d.apply(...ops); if (d === doc && fresh.length) stale = true; return fresh; }
+  const focused = document.activeElement === ed;
+  const a = doc.anchorAt(ed.selectionStart), b = doc.anchorAt(ed.selectionEnd), dir = ed.selectionDirection;
+  const fresh = d.apply(...ops);
+  if (!fresh.length) return fresh;
+  const t = doc.text();
+  if (t !== ed.value) {
+    const top = ed.scrollTop;
+    ed.value = t;
+    if (focused) ed.setSelectionRange(doc.indexOf(a), doc.indexOf(b), dir);
+    ed.scrollTop = top;
+  }
+  shown = t; counts();
+  if (fresh.some((o) => o.k === 't') && document.activeElement !== $('#title')) $('#title').value = doc.title.v;
+  return fresh;
+}
+$('#title').addEventListener('input', (e) => { send(doc.id, [doc.setTitle(e.target.value || 'Untitled')]); save(); drawDocs(); });
+ed.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); document.execCommand('insertText', false, '\t'); }
+});
+
+function open(d) {
+  doc = d; $('#title').value = d.title.v; ed.value = ''; shown = '';
+  render(); drawDocs(); drawPeople(); save();
+}
+function drawDocs() {
+  const liveIds = new Set(peers.filter((p) => p.status === 'connected').map((p) => p.doc));
+  const list = [...docs.values()].sort((a, b) => a.title.v.localeCompare(b.title.v));
+  $('#docs').replaceChildren(...list.map((d) => h('button', { class: d === doc ? 'on' : '', 'data-doc': d.id, onclick: () => open(d) },
+    d.title.v || 'Untitled', liveIds.has(d.id) ? h('span', { class: 'live', title: 'Live' }, '●') : null)));
+  document.title = `${doc.title.v || 'Untitled'} · Duet · one-file-saas`;
+}
+
+// ───────────────────────── Links and codes ─────────────────────────
+// A WebRTC offer/answer is ~1-3 KB of SDP text; deflate + base64url makes it short enough to paste.
+const b64u = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function pack(obj) {
+  const stream = new Blob([JSON.stringify(obj)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  return b64u(new Uint8Array(await new Response(stream).arrayBuffer()));
+}
+async function unpack(code) {
+  let s = String(code).trim();
+  const m = /#join=([\w-]+)/.exec(s); if (m) s = m[1];
+  s = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  const bytes = Uint8Array.from(atob(s + '==='.slice((s.length + 3) % 4)), (ch) => ch.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const obj = JSON.parse(await new Response(stream).text());
+  if (!obj || obj.app !== 'duet' || typeof obj.sdp !== 'string') throw new Error('not a Duet code');
+  return obj;
+}
+const pageUrl = () => location.href.split('#')[0];
+
+// ───────────────────────── Peers ─────────────────────────
+// Star topology: whoever sends invites is the hub and forwards every new edit to everyone else.
+// Edits are idempotent (ids), so a forwarded copy that someone already has is simply ignored.
+const peers = [];
+const rtcConfig = () => ({ iceServers: settings.stun ? [{ urls: STUN }] : [] });
+function waitForIce(pc) {
+  return new Promise((done) => {
+    if (pc.iceGatheringState === 'complete') return done();
+    const t = setTimeout(done, 4000); // a blocked STUN server shouldn't hang the invite
+    pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); done(); } });
+  });
+}
+function colorFor(name) { let n = 0; for (const ch of name) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return COLORS[n % COLORS.length]; }
+function wire(peer, dc) {
+  peer.dc = dc;
+  dc.onopen = () => {
+    peer.status = 'connected'; peer.code = ''; drawPeople(); drawDocs();
+    dc.send(JSON.stringify({ t: 'hello', name: settings.name }));
+    const ops = docs.get(peer.doc).allOps();
+    for (let i = 0; i < ops.length; i += 800) dc.send(JSON.stringify({ t: 'ops', doc: peer.doc, ops: ops.slice(i, i + 800) }));
+    toast(`${peer.name || 'Someone'} joined`);
+  };
+  dc.onclose = () => { if (peer.status !== 'ended') { peer.status = 'left'; drawPeople(); drawDocs(); } };
+  dc.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.t === 'hello') { peer.name = String(m.name || 'Guest').slice(0, 24); drawPeople(); return; }
+    if (m.t === 'ops' && m.doc === peer.doc && Array.isArray(m.ops)) {
+      const d = docs.get(peer.doc);
+      const fresh = applyRemote(d, m.ops);
+      if (fresh.length) { send(peer.doc, fresh, peer); save(); flash(peer); drawDocs(); }
+    }
+  };
+}
+function send(docId, ops, except) {
+  if (!ops.length) return;
+  for (const p of peers) {
+    if (p === except || p.doc !== docId || p.dc?.readyState !== 'open') continue;
+    for (let i = 0; i < ops.length; i += 800) p.dc.send(JSON.stringify({ t: 'ops', doc: docId, ops: ops.slice(i, i + 800) }));
+  }
+}
+function watch(peer) {
+  peer.pc.addEventListener('connectionstatechange', () => {
+    const s = peer.pc.connectionState;
+    if (s === 'failed') { peer.status = 'failed'; drawPeople(); }
+    if (s === 'disconnected' && peer.status === 'connected') { peer.status = 'left'; drawPeople(); drawDocs(); }
+  });
+}
+async function invite() {
+  const peer = { id: uid(4), role: 'host', doc: doc.id, status: 'preparing', name: '', code: '' };
+  peers.push(peer); drawPeople();
+  peer.pc = new RTCPeerConnection(rtcConfig()); watch(peer);
+  wire(peer, peer.pc.createDataChannel('duet', { ordered: true }));
+  await peer.pc.setLocalDescription(await peer.pc.createOffer());
+  await waitForIce(peer.pc);
+  peer.code = await pack({ app: 'duet', v: 1, sdp: peer.pc.localDescription.sdp, doc: doc.id, title: doc.title.v, from: settings.name });
+  peer.status = 'inviting'; drawPeople();
+}
+async function acceptReply(peer, text) {
+  try {
+    const obj = await unpack(text);
+    if (obj.kind !== 'reply') throw new Error('that is an invite, not a reply');
+    peer.name = String(obj.from || '').slice(0, 24);
+    peer.status = 'connecting'; drawPeople();
+    await peer.pc.setRemoteDescription({ type: 'answer', sdp: obj.sdp });
+  } catch (err) { toast(`Couldn't use that reply: ${err.message}`); }
+}
+async function join(text) {
+  let obj;
+  try { obj = await unpack(text); if (obj.kind === 'reply') throw new Error('that is a reply code; paste it into the invite card'); }
+  catch (err) { toast(`Couldn't read that invite: ${err.message}`); return; }
+  if (peers.some((p) => p.doc === obj.doc && ['connected', 'connecting', 'replying'].includes(p.status))) { toast('Already in that session'); return; }
+  let d = docs.get(obj.doc);
+  // the host's title op will arrive and win; until then show the title from the invite
+  if (!d) { d = newDoc('', '', obj.doc); d.title = { v: String(obj.title || 'Shared document').slice(0, 120), c: 0, s: '' }; }
+  open(d);
+  const peer = { id: uid(4), role: 'guest', doc: d.id, status: 'preparing', name: String(obj.from || 'Host').slice(0, 24), code: '' };
+  peers.push(peer); showLive(true); drawPeople();
+  peer.pc = new RTCPeerConnection(rtcConfig()); watch(peer);
+  peer.pc.ondatachannel = (e) => wire(peer, e.channel);
+  try {
+    await peer.pc.setRemoteDescription({ type: 'offer', sdp: obj.sdp });
+    await peer.pc.setLocalDescription(await peer.pc.createAnswer());
+    await waitForIce(peer.pc);
+    peer.code = await pack({ app: 'duet', v: 1, kind: 'reply', sdp: peer.pc.localDescription.sdp, from: settings.name });
+    peer.status = 'replying'; drawPeople();
+  } catch (err) { peer.status = 'failed'; drawPeople(); toast(`Couldn't answer that invite: ${err.message}`); }
+}
+function endSession() {
+  for (const p of peers) { p.status = 'ended'; try { p.dc?.close(); p.pc?.close(); } catch {} }
+  peers.length = 0; drawPeople(); drawDocs();
+}
+function flash(peer) {
+  const chip = document.querySelector(`.chip[data-peer="${peer.id}"]`);
+  if (!chip) return;
+  chip.classList.add('typing'); clearTimeout(chip.t); chip.t = setTimeout(() => chip.classList.remove('typing'), 700);
+}
+
+// ───────────────────────── Live panel ─────────────────────────
+const STATUS = {
+  preparing: ['Preparing…', ''], inviting: ['Waiting for their reply', ''], replying: ['Send your reply', ''],
+  connecting: ['Connecting…', ''], connected: ['Connected', 'ok'], left: ['Disconnected', 'bad'], failed: ['Could not connect', 'bad'],
+};
+async function copy(text, what) {
+  try { await navigator.clipboard.writeText(text); toast(`${what} copied`); } catch { toast('Select the text and copy it'); }
+}
+function drawPeople() {
+  const here = peers.filter((p) => p.doc === doc.id);
+  const on = here.filter((p) => p.status === 'connected');
+  const waiting = here.some((p) => ['inviting', 'replying', 'connecting', 'preparing'].includes(p.status));
+  const st = $('#status');
+  st.textContent = on.length ? `Live · ${on.length + 1} people` : waiting ? 'Waiting…' : 'Just you';
+  st.className = 'pill' + (on.length ? ' live' : waiting ? ' wait' : '');
+  $('#chips').replaceChildren(...on.map((p) => h('span', { class: 'chip', 'data-peer': p.id, title: p.name, style: `background:${colorFor(p.name || '?')}` }, (p.name || '?').slice(0, 1).toUpperCase())));
+  $('#leaveBtn').classList.toggle('hidden', !peers.length);
+  $('#peers').replaceChildren(...(here.length ? here.map(card) : [h('p', { class: 'note' }, 'Nobody else yet. Invite someone to edit this document with you.')]));
+}
+function card(p) {
+  const [label, cls] = STATUS[p.status] || [p.status, ''];
+  const kids = [h('div', { class: 'who' }, h('span', { class: 'chip', style: `background:${colorFor(p.name || '?')}` }, (p.name || '?').slice(0, 1).toUpperCase()),
+    p.name || (p.role === 'host' ? 'New invite' : 'Host'), h('small', { class: cls }, label))];
+  if (p.status === 'inviting') {
+    const link = pageUrl() + '#join=' + p.code;
+    kids.push(
+      h('div', { class: 'step' }, h('b', {}, '1. Send them this invite'), location.protocol === 'file:' ? ' (code, or the link if they have this file at the same path)' : ''),
+      h('textarea', { class: 'code', readonly: true, 'data-invite': '', 'aria-label': 'Invite code' }, p.code),
+      h('div', { class: 'acts' }, h('button', { class: 'btn small', onclick: () => copy(link, 'Invite link') }, 'Copy link'), h('button', { class: 'btn small', onclick: () => copy(p.code, 'Invite code') }, 'Copy code')),
+      h('div', { class: 'step' }, h('b', {}, '2. Paste the reply they send back')));
+    const box = h('textarea', { class: 'code', 'data-reply': '', 'aria-label': 'Their reply code', placeholder: 'Paste their reply code' });
+    kids.push(box, h('div', { class: 'acts' }, h('button', { class: 'btn primary small', 'data-connect': '', onclick: () => acceptReply(p, box.value) }, 'Connect')));
+  }
+  if (p.status === 'replying') {
+    kids.push(h('div', { class: 'step' }, h('b', {}, 'Send this reply code back to ' + (p.name || 'the host'))),
+      h('textarea', { class: 'code', readonly: true, 'data-answer': '', 'aria-label': 'Your reply code' }, p.code),
+      h('div', { class: 'acts' }, h('button', { class: 'btn small', onclick: () => copy(p.code, 'Reply code') }, 'Copy reply')),
+      h('p', { class: 'note' }, "You'll connect as soon as they paste it."));
+  }
+  if (p.status === 'failed') kids.push(h('p', { class: 'note' }, settings.stun ? 'A strict firewall can block direct connections. Try another network.' : 'With the STUN server off, you can only connect on the same network.'));
+  if (['left', 'failed', 'inviting', 'replying'].includes(p.status)) {
+    kids.push(h('div', { class: 'acts' }, h('button', { class: 'btn small', onclick: () => { try { p.pc.close(); } catch {} peers.splice(peers.indexOf(p), 1); drawPeople(); } }, 'Remove')));
+  }
+  return h('div', { class: 'card', 'data-status': p.status }, ...kids);
+}
+function showLive(on) { $('#live').classList.toggle('hidden', !on); if (on) drawPeople(); }
+$('#shareBtn').addEventListener('click', () => showLive($('#live').classList.contains('hidden')));
+$('#closeLive').addEventListener('click', () => showLive(false));
+$('#inviteBtn').addEventListener('click', () => invite().catch((err) => toast(`Couldn't create an invite: ${err.message}`)));
+$('#leaveBtn').addEventListener('click', endSession);
+$('#joinBtn').addEventListener('click', () => { showLive(true); $('#joinCode').focus(); });
+$('#joinGo').addEventListener('click', () => { const v = $('#joinCode').value; if (v.trim()) { $('#joinCode').value = ''; join(v); } });
+$('#myName').value = settings.name;
+$('#myName').addEventListener('input', (e) => { settings.name = e.target.value.trim() || 'Guest'; save(); });
+$('#stun').checked = settings.stun;
+$('#stun').addEventListener('change', (e) => { settings.stun = e.target.checked; save(); });
+if (location.protocol === 'file:') $('#fileNote').textContent = 'Running from a file: invite links only open where this file sits at the same path. Codes work everywhere, or host this file on any static site.';
+
+// ───────────────────────── Menu, import/export ─────────────────────────
+const menu = $('#menu');
+$('#moreBtn').addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); });
+document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.classList.add('hidden'); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { menu.classList.add('hidden'); } });
+menu.addEventListener('click', (e) => { if (e.target.closest('button')) menu.classList.add('hidden'); });
+function download(name, text, type) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const fileName = (d) => (d.title.v || 'untitled').replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
+$('#txtBtn').addEventListener('click', () => download(fileName(doc) + '.txt', doc.text(), 'text/plain'));
+$('#expJson').addEventListener('click', () => download('duet.json', JSON.stringify({ app: 'duet', v: 1, docs: [...docs.values()] }, null, 2), 'application/json'));
+$('#impJson').addEventListener('click', () => $('#file').click());
+$('#file').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (data.app !== 'duet' || !Array.isArray(data.docs)) throw 0;
+    let merged = 0, added = 0;
+    for (const d of data.docs) {
+      if (!d || typeof d.id !== 'string') continue;
+      const incoming = new Doc(d, site);
+      const mine = docs.get(d.id);
+      if (mine) { const fresh = applyRemote(mine, incoming.allOps()); send(mine.id, fresh); merged++; }
+      else { docs.set(d.id, incoming); added++; }
+    }
+    save(); drawDocs(); render(); $('#title').value = doc.title.v;
+    toast(`Imported: ${added} new, ${merged} merged`);
+  } catch { toast('Not a Duet export'); }
+});
+$('#newDoc').addEventListener('click', () => { open(newDoc('Untitled', '')); $('#title').select(); $('#title').focus(); });
+$('#delDoc').addEventListener('click', () => {
+  if (!confirm(`Delete "${doc.title.v}" from this browser? Other people keep their copies.`)) return;
+  for (const p of peers.filter((x) => x.doc === doc.id)) { p.status = 'ended'; try { p.pc.close(); } catch {} peers.splice(peers.indexOf(p), 1); }
+  docs.delete(doc.id);
+  open(docs.values().next().value || newDoc('Untitled', ''));
+});
+function setMono() { ed.classList.toggle('mono', settings.mono); $('#monoBtn').textContent = settings.mono ? 'Proportional font' : 'Monospace font'; }
+$('#monoBtn').addEventListener('click', () => { settings.mono = !settings.mono; setMono(); save(); });
+
+setMono();
+open(doc);
+if (location.hash.startsWith('#join=')) {
+  const code = location.hash;
+  history.replaceState(null, '', pageUrl());
+  join(code);
+}
+</script>
+</body>
+</html>
